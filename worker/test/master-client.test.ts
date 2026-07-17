@@ -81,10 +81,10 @@ describe("MasterClient", () => {
   });
 
   // ------------------------------------------------------------------
-  // enroll
+  // register
   // ------------------------------------------------------------------
 
-  it("enroll succeeds with valid token", async () => {
+  it("register succeeds with valid token", async () => {
     addHandler({
       method: "POST",
       path: "/v1/workers",
@@ -93,8 +93,8 @@ describe("MasterClient", () => {
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
-    const result = await client.enroll(
-      "cown_enroll_valid",
+    const result = await client.register(
+      "cown_register_valid",
       "test-worker",
       "a".repeat(64),
     );
@@ -104,7 +104,7 @@ describe("MasterClient", () => {
     assert.equal(result!.workerName, "test-worker");
   });
 
-  it("enroll returns null on 409 conflict", async () => {
+  it("register returns null on 409 conflict", async () => {
     addHandler({
       method: "POST",
       path: "/v1/workers",
@@ -113,36 +113,35 @@ describe("MasterClient", () => {
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
-    const result = await client.enroll(
-      "cown_enroll_test",
+    const result = await client.register(
+      "cown_register_test",
       "taken-name",
       "b".repeat(64),
     );
     assert.equal(result, null);
   });
 
-  it("enroll returns null on 401 invalid token", async () => {
+  it("register returns null on 401 invalid token", async () => {
     addHandler({
       method: "POST",
       path: "/v1/workers",
       status: 401,
-      body: { error: { code: "enrollment_invalid", message: "invalid", details: null } },
+      body: { error: { code: "registration_invalid", message: "invalid", details: null } },
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
-    const result = await client.enroll(
-      "cown_enroll_bad",
+    const result = await client.register(
+      "cown_register_bad",
       "bad-token",
       "c".repeat(64),
     );
     assert.equal(result, null);
   });
 
-  it("enroll returns null on network error", async () => {
-    // No handler registered -- returns 501
+  it("register returns null on network error", async () => {
     const client = new MasterClient({ masterUrl: MASTER_URL });
-    const result = await client.enroll(
-      "cown_enroll_net",
+    const result = await client.register(
+      "cown_register_net",
       "net-error",
       "d".repeat(64),
     );
@@ -154,7 +153,6 @@ describe("MasterClient", () => {
   // ------------------------------------------------------------------
 
   it("authenticate succeeds with valid signature", async () => {
-    // Challenge
     addHandler({
       method: "POST",
       path: "/v1/workers/auth/challenges",
@@ -162,7 +160,6 @@ describe("MasterClient", () => {
       body: { nonce: "test-nonce-abc", expires_at: "2026-01-01T00:00:00" },
     });
 
-    // Session (the mock accepts any nonce+signature)
     addHandler({
       method: "POST",
       path: "/v1/workers/auth/sessions",
@@ -171,7 +168,6 @@ describe("MasterClient", () => {
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
-    // Use a deterministic private key for test
     const privateKeyHex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
     const token = await client.authenticate("wrk_test123", privateKeyHex);
 
@@ -269,7 +265,6 @@ describe("MasterClient", () => {
     const ok = await client.reportRuntime("wrk_gone");
 
     assert.equal(ok, false);
-    // Session should not be cleared on 404
     assert.equal(client.sessionToken, "cown_sess_valid");
   });
 });

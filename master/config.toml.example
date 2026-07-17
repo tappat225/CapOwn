@@ -1,0 +1,44 @@
+# CapOwn Master — Example Configuration
+# Copy to a location referenced by CAPOWN_MASTER_CONFIG or the default path.
+
+role = "master"
+
+[master]
+# Network
+host = "0.0.0.0"
+port = 9210
+
+# Database
+db_path = "./data/master.db"
+
+# Public URL (for dashboard redirects, optional)
+public_url = "http://localhost:9210"
+
+# Heartbeat timeout in seconds (workers marked offline after this)
+heartbeat_timeout = 60
+
+# Web session TTL in seconds (default 8 hours)
+session_ttl = 28800
+
+# Allowed CORS origins for Dashboard browser access.
+# An empty list allows browser access from any origin. For public deployments,
+# set this to the exact Dashboard origins that should be allowed.
+allowed_dashboard_origins = []
+
+# Rate limit for login/register (requests per minute)
+rate_limit = 10
+
+# Max request body size (bytes)
+max_body_bytes = 65536
+
+# Log level: debug, info, warn, error
+log_level = "info"
+
+# In-memory store limits
+max_challenge_store_size = 1024
+max_session_store_size = 4096
+max_worker_event_queues = 1024
+max_dashboard_subscribers = 64
+
+# Password hashing concurrency limit
+password_hash_concurrency = 2

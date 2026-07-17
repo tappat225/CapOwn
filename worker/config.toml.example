@@ -4,8 +4,6 @@
 
 role = "worker"
 master_url = "https://master.example.com:9210"
-worker_name = "my-worker-next"
-enrollment_token = "cown_enroll_xxx"
 
 # Legacy [worker] section keys that are NOT used by Worker Next
 # (execution_mode, container_name, workspace, etc.) are silently ignored.

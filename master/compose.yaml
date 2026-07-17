@@ -1,0 +1,25 @@
+name: capown-master
+
+services:
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: capown-master:next
+    ports:
+      - "${MASTER_PORT:-9230}:9210"
+    environment:
+      CAPOWN_MASTER_CONFIG: /data/config.toml
+      CAPOWN_MASTER_HOST: "0.0.0.0"
+      CAPOWN_MASTER_PORT: "9210"
+      CAPOWN_MASTER_DB_PATH: /data/data/master.db
+      CAPOWN_MASTER_PUBLIC_URL: "${CAPOWN_MASTER_PUBLIC_URL:-http://localhost:${MASTER_PORT:-9230}}"
+      # Leave this empty by default so /data/config.toml remains authoritative.
+      # Set CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS explicitly for an ephemeral
+      # environment-variable override.
+      CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS: "${CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS-}"
+    volumes:
+      - type: bind
+        source: "${CAPOWN_MASTER_DIR:-${USERPROFILE:-${HOME}}/.capown/master}"
+        target: /data
+    restart: unless-stopped

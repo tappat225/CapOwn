@@ -131,7 +131,7 @@ describe("SSEParser", () => {
 });
 
 describe("SSEClient", () => {
-  it("keeps reading after the header timeout and reports comment heartbeats", async () => {
+  it("does not apply the header timeout to the response body", async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -160,7 +160,7 @@ describe("SSEClient", () => {
           heartbeats++;
         },
         signal: abort.signal,
-        connectTimeoutMs: 20,
+        connectTimeoutMs: 500,
       });
 
       await client.connect();

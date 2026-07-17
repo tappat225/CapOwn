@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-/** TypeScript types matching the CapOwn Master v1 protocol models.
-
-See ``shared/protocol.py`` in the Python codebase for the authoritative
-definition.
-*/
+/** TypeScript types matching the CapOwn Master v1 protocol models. */
 
 // --------------------------------------------------------------------------
-// Enrollment
+// Registration
 // --------------------------------------------------------------------------
 
-export interface EnrollmentRegisterRequest {
-  enrollment_token: string;
+export interface WorkerRegistrationRequest {
+  registration_token: string;
   worker_name: string;
   public_key: string;
   hostname: string;
@@ -20,9 +16,21 @@ export interface EnrollmentRegisterRequest {
   workspace: string;
 }
 
-export interface EnrollmentRegisterResponse {
+export interface WorkerRegistrationResponse {
   worker_id: string;
   worker_name: string;
+}
+
+export interface CreatedRegistrationToken {
+  token_id: string;
+  registration_token: string;
+  token_prefix: string;
+  scope: string;
+  expires_at: string;
+  max_uses: number;
+  label: string;
+  created_at: string;
+  registration_url?: string;
 }
 
 // --------------------------------------------------------------------------

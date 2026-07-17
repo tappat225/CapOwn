@@ -2,6 +2,7 @@
 /// <reference types="node" />
 /** Configuration loading, resolution, and validation for Worker Next. */
 
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -28,7 +29,6 @@ const ConfigSchema = z.object({
       message: "worker_name must be an ASCII slug (3-48 chars, lowercase)",
     })
     .optional(),
-  enrollment_token: z.string().optional(),
   worker_id: z.string().optional(),
   reconnect_interval: z
     .number()
@@ -44,7 +44,6 @@ const ConfigSchema = z.object({
 export interface WorkerNextConfig {
   readonly master_url: string;
   readonly worker_name: string;
-  readonly enrollment_token: string;
   readonly worker_id: string;
   readonly reconnect_interval: number;
   /** Resolved paths (may differ from input). */
@@ -93,7 +92,6 @@ function defaultIdentityPath(): string {
 interface FlatToml {
   master_url?: string;
   worker_name?: string;
-  enrollment_token?: string;
   worker_id?: string;
   /** Legacy execution keys -- warn once, ignore */
   [key: string]: unknown;
@@ -104,7 +102,7 @@ function parseTomlFile(filePath: string): FlatToml {
     const raw = fs.readFileSync(filePath, "utf-8");
     const parsed = TOML.parse(raw) as Record<string, unknown>;
 
-    // The existing Python config has top-level keys (master_url, worker_name, ...)
+    // The existing config has top-level keys (master_url, worker_name, ...)
     // and a [worker] section with runtime keys (reconnect_interval, ...).
     // We merge both levels.
     const workerSection = (parsed["worker"] ?? {}) as Record<string, unknown>;
@@ -117,6 +115,36 @@ function parseTomlFile(filePath: string): FlatToml {
     log.warn("config: failed to parse %s: %s", filePath, err);
     return {};
   }
+}
+
+// --------------------------------------------------------------------------
+// Write config to TOML file
+// --------------------------------------------------------------------------
+
+export function writeConfigFile(filePath: string, config: Partial<WorkerNextConfig>): void {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const lines: string[] = ['# CapOwn Worker configuration'];
+  if (config.master_url) {
+    lines.push(`master_url = "${config.master_url}"`);
+  }
+  if (config.worker_name) {
+    lines.push(`worker_name = "${config.worker_name}"`);
+  }
+  if (config.reconnect_interval) {
+    lines.push(`reconnect_interval = ${config.reconnect_interval}`);
+  }
+
+  const content = lines.join("\n") + "\n";
+
+  // Atomic write
+  const tmpPath = filePath + ".tmp." + crypto.randomBytes(4).toString("hex");
+  fs.writeFileSync(tmpPath, content, "utf-8");
+  fs.chmodSync(tmpPath, 0o600);
+  fs.renameSync(tmpPath, filePath);
 }
 
 // --------------------------------------------------------------------------
@@ -163,7 +191,6 @@ export function loadConfig(opts?: LoadConfigOptions): WorkerNextConfig {
   const candidate = {
     master_url: (raw["master_url"] as string) ?? "https://localhost:9210",
     worker_name: (raw["worker_name"] as string) ?? undefined,
-    enrollment_token: (raw["enrollment_token"] as string) ?? undefined,
     worker_id: (raw["worker_id"] as string) ?? undefined,
     reconnect_interval:
       (raw["reconnect_interval"] as number) ?? 5,
@@ -172,13 +199,9 @@ export function loadConfig(opts?: LoadConfigOptions): WorkerNextConfig {
   // Validate config shape
   const parsed = ConfigSchema.parse(candidate);
 
-  // enrollment_token is optional at config level; the daemon
-  // enforces it later when no worker_id exists in identity.
-
   return {
     master_url: parsed.master_url,
     worker_name: parsed.worker_name ?? "",
-    enrollment_token: parsed.enrollment_token ?? "",
     worker_id: parsed.worker_id ?? "",
     reconnect_interval: parsed.reconnect_interval,
     configPath,

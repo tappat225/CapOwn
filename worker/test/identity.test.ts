@@ -31,12 +31,10 @@ describe("identity", () => {
     const keys = generateKeypair();
     const nonce = "test-nonce-" + Date.now();
 
-    // Sign
     const signature = signNonce(keys.privateKeyHex, nonce);
     assert.equal(signature.length, 128);
     assert.match(signature, /^[0-9a-f]{128}$/);
 
-    // Reconstruct and verify with Node crypto
     const prefix = Buffer.from([
       0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
       0x70, 0x03, 0x21, 0x00,
@@ -67,14 +65,12 @@ describe("identity", () => {
       };
       writeIdentityFile(idPath, data);
 
-      // Verify file exists with correct format
       const content = fs.readFileSync(idPath, "utf-8");
       assert.ok(content.includes('private_key = "'));
       assert.ok(content.includes('public_key = "'));
       assert.ok(content.includes('worker_id = "'));
       assert.ok(content.includes('worker_name = "'));
 
-      // Read it back
       const parsed = parseIdentityFile(idPath);
       assert.equal(parsed.privateKeyHex, "a".repeat(64));
       assert.equal(parsed.publicKeyHex, "b".repeat(64));
@@ -96,7 +92,6 @@ describe("identity", () => {
       assert.equal(data.workerId, "");
       assert.equal(data.workerName, "");
 
-      // Calling again reuses the same keys
       const data2 = loadOrGenerateIdentity(idPath);
       assert.equal(data2.privateKeyHex, data.privateKeyHex);
       assert.equal(data2.publicKeyHex, data.publicKeyHex);
@@ -110,13 +105,10 @@ describe("identity", () => {
     try {
       const idPath = path.join(tmp, "identity.toml");
 
-      // First generate keys
       const before = loadOrGenerateIdentity(idPath);
 
-      // Save worker IDs
       saveIdentityIds(idPath, "wrk_abc123", "named-worker");
 
-      // Verify keys preserved and IDs saved
       const after = parseIdentityFile(idPath);
       assert.equal(after.privateKeyHex, before.privateKeyHex);
       assert.equal(after.publicKeyHex, before.publicKeyHex);

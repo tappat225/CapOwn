@@ -1,0 +1,1501 @@
+openapi: 3.1.0
+info:
+  title: CapOwn Control Plane API
+  version: 1.1.0
+  description: |
+    Language-independent v1.1 wire contract for the CapOwn control plane.
+
+    This document covers the current connectivity milestone. Task dispatch,
+    task results, task history, cancellation, execution capabilities, and
+    plugin invocation are intentionally out of scope until a later protocol
+    extension is approved.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  x-capown-protocol-version: "1.1"
+
+servers:
+  - url: http://localhost:9210
+    description: Local development Master
+
+tags:
+  - name: meta
+  - name: auth
+  - name: tokens
+  - name: worker-registrations
+  - name: workers
+  - name: events
+  - name: admin
+
+paths:
+  /healthz:
+    get:
+      tags: [meta]
+      summary: Process health check
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: Process is serving requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /v1/health:
+    get:
+      tags: [meta]
+      summary: Versioned health check
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Master is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /v1/meta:
+    get:
+      tags: [meta]
+      summary: Get Master metadata and protocol capabilities
+      operationId: getMeta
+      security: []
+      responses:
+        "200":
+          description: Master metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetaResponse'
+
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      summary: Register the first user
+      description: Registration succeeds only while the Master has no users.
+      operationId: registerFirstUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialsRequest'
+      responses:
+        "201":
+          description: User created and a web session issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Create a web session
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialsRequest'
+      responses:
+        "200":
+          description: Web session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current web session
+      operationId: logout
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      responses:
+        "200":
+          description: Session revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: logged_out
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/me:
+    get:
+      tags: [auth]
+      summary: Get the current user
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/me/password:
+    patch:
+      tags: [auth]
+      summary: Change the current user's password
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        "200":
+          description: Password changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, sessions_revoked]
+                properties:
+                  status:
+                    type: string
+                    const: password_updated
+                  sessions_revoked:
+                    type: integer
+                    minimum: 0
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/tokens:
+    get:
+      tags: [tokens]
+      summary: List tokens owned by the current user
+      operationId: listTokens
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - $ref: '#/components/parameters/TokenTypeQuery'
+      responses:
+        "200":
+          description: Token list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenListResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [tokens]
+      summary: Create a client or admin token
+      operationId: createToken
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTokenRequest'
+      responses:
+        "201":
+          description: Token created. The plaintext token is returned only here.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedToken'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/tokens/{token_id}:
+    delete:
+      tags: [tokens]
+      summary: Revoke an owned token
+      operationId: revokeToken
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - $ref: '#/components/parameters/TokenId'
+      responses:
+        "204":
+          description: Token revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/worker-registrations:
+    get:
+      tags: [worker-registrations]
+      summary: List Worker registration tokens
+      operationId: listWorkerRegistrations
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      responses:
+        "200":
+          description: Registration token list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegistrationTokenView'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [worker-registrations]
+      summary: Create a Worker registration token
+      operationId: createWorkerRegistration
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRegistrationRequest'
+      responses:
+        "201":
+          description: Registration token created. The plaintext token and registration URL are returned only here.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedRegistrationToken'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/worker-registrations/{registration_id}:
+    delete:
+      tags: [worker-registrations]
+      summary: Revoke an owned Worker registration token
+      operationId: revokeWorkerRegistration
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      responses:
+        "204":
+          description: Registration token revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/workers:
+    get:
+      tags: [workers]
+      summary: List active Workers visible to the caller
+      operationId: listWorkers
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, client, admin, worker]
+      responses:
+        "200":
+          description: Worker list ordered by registration time.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerListResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [workers]
+      summary: Register a Worker using a registration token
+      operationId: registerWorker
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerRegistrationRequest'
+      responses:
+        "201":
+          description: Worker registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerRegistrationResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/RegistrationUnauthorized'
+        "409":
+          $ref: '#/components/responses/RegistrationConflict'
+
+  /v1/workers/auth/challenges:
+    post:
+      tags: [workers]
+      summary: Issue an Ed25519 authentication challenge
+      operationId: createWorkerChallenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerAuthChallengeRequest'
+      responses:
+        "200":
+          description: Challenge issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerAuthChallengeResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+
+  /v1/workers/auth/sessions:
+    post:
+      tags: [workers]
+      summary: Verify a signed challenge and create a Worker session
+      operationId: createWorkerSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerAuthSessionRequest'
+      responses:
+        "200":
+          description: Worker session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerAuthSessionResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/SignatureUnauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/workers/{worker_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkerId'
+    get:
+      tags: [workers]
+      summary: Get one visible Worker
+      operationId: getWorker
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, client, admin, worker]
+      responses:
+        "200":
+          description: Worker information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Worker'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+    patch:
+      tags: [workers]
+      summary: Rename a Worker
+      operationId: renameWorker
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameWorkerRequest'
+      responses:
+        "200":
+          description: Worker renamed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: updated
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [workers]
+      summary: Revoke a Worker
+      operationId: revokeWorker
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      responses:
+        "204":
+          description: Worker revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+
+  /v1/workers/{worker_id}/runtime:
+    put:
+      tags: [workers]
+      summary: Report Worker runtime metadata
+      operationId: updateWorkerRuntime
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [worker]
+      parameters:
+        - $ref: '#/components/parameters/WorkerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerRuntimeUpdateRequest'
+      responses:
+        "200":
+          description: Runtime metadata accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+
+  /v1/workers/{worker_id}/events:
+    get:
+      tags: [events, workers]
+      summary: Open the Worker command/event SSE stream
+      description: |
+        This stream is authenticated with a Worker session and is consumed by
+        the Worker. It is not a client-facing task API. v1 only guarantees
+        heartbeat comments and transport delivery of broker events; no task
+        event type is defined in this version.
+      operationId: workerEventStream
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [worker]
+      parameters:
+        - $ref: '#/components/parameters/WorkerId'
+      responses:
+        "200":
+          description: SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE wire stream. See components.schemas.SSEEnvelope.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+
+  /v1/events:
+    get:
+      tags: [events]
+      summary: Open the dashboard event SSE stream
+      description: |
+        Dashboard events include an SSE id and can be replayed by sending the
+        Last-Event-ID request header. A resync event is emitted when the id is
+        no longer available in the in-memory history.
+      operationId: dashboardEventStream
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Last dashboard event id received by the client.
+      responses:
+        "200":
+          description: Dashboard SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE wire stream. See components.schemas.DashboardSSEEnvelope.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/admin/users:
+    get:
+      tags: [admin]
+      summary: List users
+      operationId: adminListUsers
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      responses:
+        "200":
+          description: User list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [admin]
+      summary: Create a user
+      operationId: adminCreateUser
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /v1/admin/users/{username}:
+    parameters:
+      - $ref: '#/components/parameters/Username'
+    get:
+      tags: [admin]
+      summary: Get a user
+      operationId: adminGetUser
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      responses:
+        "200":
+          description: User.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+    patch:
+      tags: [admin]
+      summary: Update a user
+      operationId: adminPatchUser
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminPatchUserRequest'
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /v1/admin/users/{username}/tokens:
+    get:
+      tags: [admin]
+      summary: List a user's tokens
+      operationId: adminListUserTokens
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        "200":
+          description: User token list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminTokenView'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+    post:
+      tags: [admin]
+      summary: Create a token for a user
+      operationId: adminCreateUserToken
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTokenRequest'
+      responses:
+        "201":
+          description: Token created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreatedToken'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+
+  /v1/admin/tokens/{token_id}:
+    delete:
+      tags: [admin]
+      summary: Revoke any token
+      operationId: adminRevokeToken
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/TokenId'
+      responses:
+        "204":
+          description: Token revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/TokenNotFound'
+
+  /v1/admin/users/{username}/worker-registrations:
+    get:
+      tags: [admin]
+      summary: List a user's Worker registration tokens
+      operationId: adminListWorkerRegistrations
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        "200":
+          description: Registration token list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegistrationTokenView'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+    post:
+      tags: [admin]
+      summary: Create a Worker registration token for a user
+      operationId: adminCreateWorkerRegistration
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRegistrationRequest'
+      responses:
+        "201":
+          description: Registration token created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreatedRegistrationToken'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
+
+  /v1/admin/worker-registrations/{registration_id}:
+    delete:
+      tags: [admin]
+      summary: Revoke any Worker registration token
+      operationId: adminRevokeWorkerRegistration
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/RegistrationId'
+      responses:
+        "204":
+          description: Registration token revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Send `Authorization: Bearer <token>`. Token classes are identified by
+        server-side storage and, for web/worker sessions, by the cown_* prefix.
+
+  parameters:
+    WorkerId:
+      name: worker_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/WorkerId'
+    TokenId:
+      name: token_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ShortId'
+    RegistrationId:
+      name: registration_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ShortId'
+    Username:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    TokenTypeQuery:
+      name: type
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [client]
+      description: When set to `client`, return only client tokens. Omit to list all owned tokens.
+
+  responses:
+    InvalidInput:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing, invalid, or expired credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RegistrationUnauthorized:
+      description: Registration token is invalid or expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    SignatureUnauthorized:
+      description: Challenge nonce or signature is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Credentials are valid but do not grant the requested access.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Request conflicts with current state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RegistrationConflict:
+      description: Registration token is exhausted or worker name conflicts.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    WorkerNotFound:
+      description: Worker not found or revoked.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UserNotFound:
+      description: User not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TokenNotFound:
+      description: Token not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/APIError'
+
+    APIError:
+      type: object
+      additionalProperties: false
+      required: [code, message, details]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          examples: [invalid_input]
+        message:
+          type: string
+          description: Human-readable diagnostic message.
+        details:
+          description: Optional structured details. Current v1 commonly returns null.
+          type: [object, array, string, number, boolean, 'null']
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+
+    MetaResponse:
+      type: object
+      additionalProperties: false
+      required: [product, version, protocol_version, initialized, capabilities]
+      properties:
+        product:
+          type: string
+          examples: [capown-master]
+        version:
+          type: string
+        protocol_version:
+          type: string
+          const: "1.1"
+        initialized:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    CredentialsRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+
+    LoginResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_at, user]
+      properties:
+        access_token:
+          type: string
+          description: Opaque web session token. Treat as a secret.
+        token_type:
+          type: string
+          const: bearer
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+        user:
+          $ref: '#/components/schemas/User'
+
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [old_password, new_password]
+      properties:
+        old_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
+
+    User:
+      type: object
+      additionalProperties: false
+      required: [user_id, username, role, status, created_at]
+      properties:
+        user_id:
+          $ref: '#/components/schemas/ShortId'
+        username:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        disabled_at:
+          type: [string, 'null']
+          format: date-time
+
+    CreateTokenRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [client, admin]
+          default: client
+        label:
+          type: string
+          default: ""
+
+    CreatedToken:
+      type: object
+      additionalProperties: false
+      required: [token_id, token, token_type, token_prefix, label, created_at]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        token:
+          type: string
+          description: Plaintext token. Returned only at creation time.
+        token_type:
+          type: string
+          enum: [client, admin]
+        token_prefix:
+          type: string
+        label:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+
+    TokenView:
+      type: object
+      additionalProperties: false
+      required: [token_id, token_type, token_prefix, label, created_at, expires_at, last_used_at, revoked_at, status]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        token_type:
+          type: string
+        token_prefix:
+          type: string
+        label:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+        last_used_at:
+          type: [string, 'null']
+          format: date-time
+        revoked_at:
+          type: [string, 'null']
+          format: date-time
+        status:
+          type: string
+          enum: [active, revoked]
+
+    TokenListResponse:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenView'
+        total:
+          type: integer
+          minimum: 0
+
+    CreateRegistrationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          default: ""
+        expires_in:
+          type: integer
+          minimum: 1
+          default: 86400
+        max_uses:
+          type: integer
+          minimum: 1
+          default: 1
+
+    RegistrationTokenView:
+      type: object
+      additionalProperties: false
+      required: [token_id, token_prefix, scope, expires_at, max_uses, used_count, created_at, label]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        token_prefix:
+          type: string
+        scope:
+          type: string
+          const: worker
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+        max_uses:
+          type: integer
+          minimum: 1
+        used_count:
+          type: integer
+          minimum: 0
+        revoked_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        label:
+          type: string
+
+    CreatedRegistrationToken:
+      type: object
+      additionalProperties: false
+      required: [token_id, registration_token, token_prefix, scope, expires_at, max_uses, label, created_at]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        registration_token:
+          type: string
+          description: Plaintext registration token. Returned only at creation time.
+        token_prefix:
+          type: string
+        scope:
+          type: string
+          const: worker
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+        max_uses:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        registration_url:
+          type: string
+          description: Full registration link for the Worker CLI (present when CAPOWN_MASTER_PUBLIC_URL is configured).
+
+    AdminCreatedRegistrationToken:
+      type: object
+      additionalProperties: false
+      required: [token_id, registration_token, token_prefix, scope, expires_at, max_uses, label, created_at, created_for]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        registration_token:
+          type: string
+          description: Plaintext registration token. Returned only at creation time.
+        token_prefix:
+          type: string
+        scope:
+          type: string
+          const: worker
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+        max_uses:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        created_for:
+          type: string
+        registration_url:
+          type: string
+          description: Full registration link when CAPOWN_MASTER_PUBLIC_URL is configured.
+
+    WorkerRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [registration_token, worker_name, public_key, hostname, os, mode, capabilities, workspace]
+      properties:
+        registration_token:
+          type: string
+        worker_name:
+          $ref: '#/components/schemas/WorkerName'
+        public_key:
+          type: string
+          pattern: '^[0-9a-fA-F]{64}$'
+          description: 32-byte Ed25519 public key encoded as hexadecimal.
+        hostname:
+          type: string
+        os:
+          type: string
+        mode:
+          type: string
+          default: capability
+        capabilities:
+          type: array
+          items:
+            type: string
+        workspace:
+          type: string
+
+    WorkerRegistrationResponse:
+      type: object
+      additionalProperties: false
+      required: [worker_id, worker_name]
+      properties:
+        worker_id:
+          $ref: '#/components/schemas/WorkerId'
+        worker_name:
+          $ref: '#/components/schemas/WorkerName'
+
+    WorkerAuthChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [worker_id]
+      properties:
+        worker_id:
+          $ref: '#/components/schemas/WorkerId'
+
+    WorkerAuthChallengeResponse:
+      type: object
+      additionalProperties: false
+      required: [nonce, expires_at]
+      properties:
+        nonce:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Opaque challenge nonce. Sign its UTF-8 bytes exactly as received.
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+
+    WorkerAuthSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [worker_id, nonce, signature]
+      properties:
+        worker_id:
+          $ref: '#/components/schemas/WorkerId'
+        nonce:
+          type: string
+        signature:
+          type: string
+          pattern: '^[0-9a-f]{128}$'
+          description: Ed25519 signature encoded as hexadecimal.
+
+    WorkerAuthSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [status, session_token]
+      properties:
+        status:
+          type: string
+          const: ok
+        session_token:
+          type: string
+          description: Opaque Worker session token. Treat as a secret.
+
+    WorkerRuntimeUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [hostname, os, mode, capabilities, workspace]
+      properties:
+        hostname:
+          type: string
+        os:
+          type: string
+        mode:
+          type: string
+          default: capability
+        capabilities:
+          type: array
+          items:
+            type: string
+        workspace:
+          type: string
+
+    Worker:
+      type: object
+      additionalProperties: false
+      required: [worker_id, worker_name, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at]
+      properties:
+        worker_id:
+          $ref: '#/components/schemas/WorkerId'
+        worker_name:
+          $ref: '#/components/schemas/WorkerName'
+        hostname:
+          type: string
+        os:
+          type: string
+        mode:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        workspace:
+          type: string
+        status:
+          type: string
+          enum: [online, offline]
+        last_heartbeat:
+          type: [string, 'null']
+          format: date-time
+        registered_at:
+          type: [string, 'null']
+          format: date-time
+        previous_worker_name:
+          type: [string, 'null']
+        renamed_at:
+          type: [string, 'null']
+
+    WorkerListResponse:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Worker'
+        total:
+          type: integer
+          minimum: 0
+
+    RenameWorkerRequest:
+      type: object
+      additionalProperties: false
+      required: [worker_name]
+      properties:
+        worker_name:
+          $ref: '#/components/schemas/WorkerName'
+
+    AdminCreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+        role:
+          type: string
+          enum: [user, admin]
+          default: user
+
+    AdminPatchUserRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          minLength: 8
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]
+
+    AdminTokenView:
+      type: object
+      additionalProperties: false
+      required: [token_id, token_type, token_prefix, name, created_at]
+      properties:
+        token_id:
+          $ref: '#/components/schemas/ShortId'
+        token_type:
+          type: string
+        token_prefix:
+          type: string
+        name:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        last_used_at:
+          type: [string, 'null']
+          format: date-time
+        revoked_at:
+          type: [string, 'null']
+          format: date-time
+
+    AdminCreatedToken:
+      allOf:
+        - $ref: '#/components/schemas/CreatedToken'
+
+    SSEEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event, data]
+      properties:
+        event:
+          type: string
+          description: SSE event field.
+        data:
+          description: JSON value carried in the SSE data field.
+
+    DashboardSSEEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SSEEnvelope'
+        - type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+
+    WorkerId:
+      type: string
+      pattern: '^wrk_[0-9a-f]{24}$'
+
+    ShortId:
+      type: string
+      pattern: '^[0-9a-f]{12}$'
+
+    WorkerName:
+      type: string
+      minLength: 3
+      maxLength: 48
+      pattern: '^[a-z0-9][a-z0-9._-]{1,46}[a-z0-9]$'
+      description: Lowercase worker name; reserved names and wrk_ prefix are disallowed.
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: UTC RFC 3339 timestamp.

@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="node" />
-/** HTTP client for the CapOwn Master v1 API -- enroll, challenge, session, runtime. */
+/** HTTP client for the CapOwn Master v1 API -- register, challenge, session, runtime. */
 
-import * as crypto from "node:crypto";
-import { log } from "./logging.js";
 import { signNonce } from "./identity.js";
 import { getPlatformInfo } from "./platform.js";
 import type {
-  EnrollmentRegisterRequest,
-  EnrollmentRegisterResponse,
+  WorkerRegistrationRequest,
+  WorkerRegistrationResponse,
   WorkerAuthChallengeResponse,
   WorkerAuthVerifyResponse,
   WorkerReconnectRequest,
@@ -109,13 +107,9 @@ export interface MasterClientOptions {
   masterUrl: string;
 }
 
-export interface EnrollResult {
+export interface RegisterResult {
   workerId: string;
   workerName: string;
-}
-
-export interface SessionResult {
-  sessionToken: string;
 }
 
 export class MasterClient {
@@ -140,21 +134,21 @@ export class MasterClient {
   }
 
   // ------------------------------------------------------------------
-  // Enrollment
+  // Registration
   // ------------------------------------------------------------------
 
-  /** Register this worker with the Master via enrollment token.
+  /** Register this worker with the Master via registration token.
    *
    * Returns ``{workerId, workerName}`` on success or null on failure.
    */
-  async enroll(
-    enrollmentToken: string,
+  async register(
+    registrationToken: string,
     workerName: string,
     publicKeyHex: string,
-  ): Promise<EnrollResult | null> {
+  ): Promise<RegisterResult | null> {
     const platform = getPlatformInfo();
-    const body: EnrollmentRegisterRequest = {
-      enrollment_token: enrollmentToken,
+    const body: WorkerRegistrationRequest = {
+      registration_token: registrationToken,
       worker_name: workerName,
       public_key: publicKeyHex,
       hostname: platform.hostname,
@@ -165,30 +159,15 @@ export class MasterClient {
     };
 
     const url = buildUrl(this._opts.masterUrl, "/v1/workers");
-    const result = await doPost<EnrollmentRegisterResponse>(url, body);
+    const result = await doPost<WorkerRegistrationResponse>(url, body);
 
     if (result.ok) {
-      log.info(
-        "master: enrolled as %s (worker_id=%s)",
-        result.data.worker_name,
-        result.data.worker_id,
-      );
       return {
         workerId: result.data.worker_id,
         workerName: result.data.worker_name,
       };
     }
 
-    // Log error details without leaking secrets
-    const status = result.status;
-    const text = result.text.length > 200 ? result.text.slice(0, 200) + "..." : result.text;
-    if (status === 409) {
-      log.error("master: enrollment failed -- name already taken (409)");
-    } else if (status === 401) {
-      log.error("master: enrollment failed -- token invalid or expired (401)");
-    } else {
-      log.error("master: enrollment failed (%d): %s", status, text);
-    }
     return null;
   }
 
@@ -216,11 +195,6 @@ export class MasterClient {
     );
 
     if (!challengeResult.ok) {
-      log.error(
-        "master: challenge request failed (%d): %s",
-        challengeResult.status,
-        challengeResult.text.slice(0, 200),
-      );
       return null;
     }
 
@@ -230,8 +204,7 @@ export class MasterClient {
     let signature: string;
     try {
       signature = signNonce(privateKeyHex, nonce);
-    } catch (err) {
-      log.error("master: failed to sign nonce: %s", err);
+    } catch {
       return null;
     }
 
@@ -250,16 +223,10 @@ export class MasterClient {
     );
 
     if (!sessionResult.ok) {
-      log.error(
-        "master: auth verify failed (%d): %s",
-        sessionResult.status,
-        sessionResult.text.slice(0, 200),
-      );
       return null;
     }
 
     this._sessionToken = sessionResult.data.session_token;
-    log.info("master: authenticated as %s", workerId);
     return this._sessionToken;
   }
 
@@ -289,26 +256,12 @@ export class MasterClient {
     const result = await doPut<WorkerInfo>(url, body, this._authHeaders());
 
     if (result.ok) {
-      log.info(
-        "master: reported runtime metadata (hostname=%s, mode=capability)",
-        platform.hostname,
-      );
       return true;
     }
 
     const status = result.status;
     if (status === 401 || status === 403) {
-      log.warn(
-        "master: session rejected during runtime report (%d), clearing session",
-        status,
-      );
       this._sessionToken = "";
-    } else {
-      log.error(
-        "master: runtime report failed (%d): %s",
-        status,
-        result.text.slice(0, 200),
-      );
     }
     return false;
   }

@@ -3,18 +3,23 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 > **This is a connectivity-only milestone.** Worker Next can join the CapOwn
-> control plane (enroll, authenticate, maintain an SSE connection) but does
+> control plane (register, authenticate, maintain an SSE connection) but does
 > **not** execute tasks or implement any file/shell/container capabilities.
+
+The Worker/Master wire contract is defined centrally in
+[`../protocol/openapi.yaml`](../protocol/openapi.yaml). The TypeScript types in
+`src/protocol.ts` are an implementation view of that contract.
 
 ## Status
 
 - [x] Project skeleton: CLI, logging, signal handling
 - [x] Configuration: TOML loading, env overrides, Zod validation
 - [x] Identity: Ed25519 keys, PyNaCl-compatible signing, identity.toml
-- [x] Master client: enroll, challenge-response auth, runtime PUT
+- [x] Master client: register, challenge-response auth, runtime PUT
 - [x] SSE parser and reconnecting client
 - [x] Cross-language signature verification (Node <-> PyNaCl)
-- [x] Master `None` vs `[]` capability fix
+- [x] Installation script: `install-worker.sh` / `install-worker.ps1`
+- [x] Registration flow: `capown-worker register <link>`
 
 ## Usage
 
@@ -24,8 +29,23 @@ npm ci
 npm run typecheck
 npm test
 npm run build
-npm start -- daemon --config path/to/config.toml
-npm start -- status
+
+# Install to ~/.capown (optional)
+bash ../scripts/install-worker.sh
+# or on Windows:
+# ..\scripts\install-worker.ps1
+
+# Register with a Master
+capown-worker register https://master.example.com/v1/worker-registrations/<token>
+
+# Start daemon
+capown-worker daemon
+
+# Check status
+capown-worker status
+
+# Show config
+capown-worker config show
 ```
 
 ### Configuration
@@ -45,6 +65,10 @@ Ed25519 keys are generated using Node's `crypto` module and are fully
 interoperable with PyNaCl. Use `--identity <path>` or `CAPOWN_WORKER_IDENTITY`
 for isolated testing.
 
+The `register` command saves the `worker_id` and `worker_name` to the identity
+file after a successful registration. The daemon then only needs the identity
+to authenticate; no registration token is persisted.
+
 ## Architecture
 
 ```
@@ -54,7 +78,7 @@ src/
   config.ts         Configuration loading and validation
   identity.ts       Ed25519 key management
   platform.ts       Hostname and OS detection
-  protocol.ts       TypeScript types for Master v1 API
+  protocol.ts       TypeScript types for the current Master API protocol
   master-client.ts  HTTP client for Master endpoints
   sse.ts            SSE parser and reconnecting client
   daemon.ts         Main lifecycle loop
@@ -71,6 +95,9 @@ src/
    PyNaCl for cross-language compatibility.
 4. **Minimal dependencies** -- Only `toml` (parser) and `zod` (validation).
    Everything else (fetch, crypto, os, fs/promises, node:test) is built-in.
+5. **Registration token is never persisted** -- The `register` command uses
+   the registration token once and discards it. The daemon authenticates
+   solely via Ed25519 challenge-response using the worker identity.
 
 ## Testing
 
@@ -80,7 +107,4 @@ npm test
 
 # Cross-language signature verification
 uv run python scripts/verify-python-signature.py
-
-# Existing Python regression tests (must pass)
-uv run python tests/unit/test_registry.py
 ```
