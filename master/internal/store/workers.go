@@ -2,8 +2,11 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/capown/master/internal/domain"
 )
 
 // WorkerRow represents a row from the workers table.
@@ -23,6 +26,7 @@ type WorkerRow struct {
 	PreviousWorkerName sql.NullString
 	RenamedAt          sql.NullString
 	RevokedAt          sql.NullString
+	Plugins            sql.NullString
 }
 
 func scanWorker(scanner interface {
@@ -33,7 +37,7 @@ func scanWorker(scanner interface {
 		&w.WorkerID, &w.WorkerName, &w.OwnerUserID, &w.PublicKey,
 		&w.Hostname, &w.OS, &w.Mode, &w.Capabilities,
 		&w.Workspace, &w.Status, &w.LastHeartbeat, &w.RegisteredAt,
-		&w.PreviousWorkerName, &w.RenamedAt, &w.RevokedAt,
+		&w.PreviousWorkerName, &w.RenamedAt, &w.RevokedAt, &w.Plugins,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -61,7 +65,7 @@ func (s *Store) RegisterWorker(
 }
 
 // ReconnectWorker updates runtime metadata and sets status to online.
-func (s *Store) ReconnectWorker(workerID, hostname, osName, mode, capabilities, workspace string) (*WorkerRow, bool, error) {
+func (s *Store) ReconnectWorker(workerID, hostname, osName, mode, capabilities, workspace, plugins string) (*WorkerRow, bool, error) {
 	now := NowISO()
 	var prevStatus string
 	err := s.db.QueryRow(`SELECT status FROM workers WHERE worker_id = ? AND revoked_at IS NULL`, workerID).Scan(&prevStatus)
@@ -71,9 +75,9 @@ func (s *Store) ReconnectWorker(workerID, hostname, osName, mode, capabilities, 
 
 	becameOnline := prevStatus == "offline"
 	_, err = s.db.Exec(
-		`UPDATE workers SET hostname = ?, os = ?, mode = ?, capabilities = ?, workspace = ?, status = 'online', last_heartbeat = ?
+		`UPDATE workers SET hostname = ?, os = ?, mode = ?, capabilities = ?, workspace = ?, plugins = ?, status = 'online', last_heartbeat = ?
 		 WHERE worker_id = ? AND revoked_at IS NULL`,
-		hostname, osName, mode, capabilities, workspace, now, workerID,
+		hostname, osName, mode, capabilities, workspace, plugins, now, workerID,
 	)
 	if err != nil {
 		return nil, false, err
@@ -86,7 +90,7 @@ func (s *Store) ReconnectWorker(workerID, hostname, osName, mode, capabilities, 
 // GetWorker looks up a worker by ID.
 func (s *Store) GetWorker(workerID string) (*WorkerRow, error) {
 	row := s.db.QueryRow(
-		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at
+		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at, plugins
 		 FROM workers WHERE worker_id = ?`, workerID)
 	return scanWorker(row)
 }
@@ -94,7 +98,7 @@ func (s *Store) GetWorker(workerID string) (*WorkerRow, error) {
 // GetActiveWorker looks up a non-revoked worker.
 func (s *Store) GetActiveWorker(workerID string) (*WorkerRow, error) {
 	row := s.db.QueryRow(
-		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at
+		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at, plugins
 		 FROM workers WHERE worker_id = ? AND revoked_at IS NULL`, workerID)
 	return scanWorker(row)
 }
@@ -112,7 +116,7 @@ func (s *Store) GetPublicKey(workerID string) (string, error) {
 // ListAllWorkers returns all workers.
 func (s *Store) ListAllWorkers() ([]*WorkerRow, error) {
 	rows, err := s.db.Query(
-		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at
+		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at, plugins
 		 FROM workers ORDER BY registered_at`)
 	if err != nil {
 		return nil, err
@@ -133,7 +137,7 @@ func (s *Store) ListAllWorkers() ([]*WorkerRow, error) {
 // ListWorkersByOwner returns workers owned by a specific user (including revoked).
 func (s *Store) ListWorkersByOwner(ownerUserID string) ([]*WorkerRow, error) {
 	rows, err := s.db.Query(
-		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at
+		`SELECT worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, revoked_at, plugins
 		 FROM workers WHERE owner_user_id = ? ORDER BY registered_at`, ownerUserID)
 	if err != nil {
 		return nil, err
@@ -149,6 +153,26 @@ func (s *Store) ListWorkersByOwner(ownerUserID string) ([]*WorkerRow, error) {
 		workers = append(workers, w)
 	}
 	return workers, rows.Err()
+}
+
+// GetWorkerPlugins returns the plugin metadata JSON for a worker.
+func (s *Store) GetWorkerPlugins(workerID string) ([]domain.PluginInfo, error) {
+	row := s.db.QueryRow(`SELECT plugins FROM workers WHERE worker_id = ? AND revoked_at IS NULL`, workerID)
+	var plugins sql.NullString
+	if err := row.Scan(&plugins); err != nil {
+		if err == sql.ErrNoRows {
+			return []domain.PluginInfo{}, nil
+		}
+		return nil, err
+	}
+	if !plugins.Valid || plugins.String == "" {
+		return []domain.PluginInfo{}, nil
+	}
+	var result []domain.PluginInfo
+	if err := json.Unmarshal([]byte(plugins.String), &result); err != nil {
+		return []domain.PluginInfo{}, nil
+	}
+	return result, nil
 }
 
 // SetOnline marks a worker as online and updates heartbeat without touching metadata.

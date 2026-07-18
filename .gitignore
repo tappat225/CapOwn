@@ -3,3 +3,5 @@ master/data/
 master/.gocache/
 worker/node_modules/
 worker/dist/
+__pycache__/
+*.py[cod]

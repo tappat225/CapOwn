@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,18 +16,19 @@ type patchWorkerRequest struct {
 }
 
 type workerListItem struct {
-	WorkerID           string   `json:"worker_id"`
-	WorkerName         string   `json:"worker_name"`
-	Hostname           string   `json:"hostname"`
-	OS                 string   `json:"os"`
-	Mode               string   `json:"mode"`
-	Capabilities       []string `json:"capabilities"`
-	Workspace          string   `json:"workspace"`
-	Status             string   `json:"status"`
-	LastHeartbeat      *string  `json:"last_heartbeat"`
-	RegisteredAt       *string  `json:"registered_at"`
-	PreviousWorkerName *string  `json:"previous_worker_name"`
-	RenamedAt          *string  `json:"renamed_at"`
+	WorkerID           string              `json:"worker_id"`
+	WorkerName         string              `json:"worker_name"`
+	Hostname           string              `json:"hostname"`
+	OS                 string              `json:"os"`
+	Mode               string              `json:"mode"`
+	Capabilities       []string            `json:"capabilities"`
+	Workspace          string              `json:"workspace"`
+	Status             string              `json:"status"`
+	LastHeartbeat      *string             `json:"last_heartbeat"`
+	RegisteredAt       *string             `json:"registered_at"`
+	PreviousWorkerName *string             `json:"previous_worker_name"`
+	RenamedAt          *string             `json:"renamed_at"`
+	Plugins            []domain.PluginInfo `json:"plugins,omitempty"`
 }
 
 type workerListResponse struct {
@@ -54,6 +56,17 @@ func strPtr(s string, valid bool) *string {
 		return nil
 	}
 	return &s
+}
+
+func pluginsToSlice(raw string) []domain.PluginInfo {
+	if raw == "" {
+		return nil
+	}
+	var plugins []domain.PluginInfo
+	if err := json.Unmarshal([]byte(raw), &plugins); err != nil || len(plugins) == 0 {
+		return nil
+	}
+	return plugins
 }
 
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +108,7 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 			RegisteredAt:       strPtr(w.RegisteredAt.String, w.RegisteredAt.Valid),
 			PreviousWorkerName: strPtr(w.PreviousWorkerName.String, w.PreviousWorkerName.Valid),
 			RenamedAt:          strPtr(w.RenamedAt.String, w.RenamedAt.Valid),
+			Plugins:            pluginsToSlice(w.Plugins.String),
 		})
 	}
 
@@ -143,6 +157,7 @@ func (s *Server) handleGetWorker(w http.ResponseWriter, r *http.Request) {
 		RegisteredAt:       strPtr(worker.RegisteredAt.String, worker.RegisteredAt.Valid),
 		PreviousWorkerName: strPtr(worker.PreviousWorkerName.String, worker.PreviousWorkerName.Valid),
 		RenamedAt:          strPtr(worker.RenamedAt.String, worker.RenamedAt.Valid),
+		Plugins:            pluginsToSlice(worker.Plugins.String),
 	})
 }
 

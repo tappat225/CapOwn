@@ -2,6 +2,26 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+## 1.2.0 — 2026-07-17
+
+Added plugin discovery and task dispatch protocol:
+
+- New schemas: `PluginToolInfo`, `PluginInfo`, `TaskId`, `TaskStatus`,
+  `TaskDispatchRequest`, `Task`, `TaskResult`, `PluginCallResult`,
+  `ContentBlock`.
+- New endpoint `GET /v1/workers/{worker_id}/plugins` — list Worker plugins.
+- New endpoint `POST /v1/tasks` — dispatch a task (sync with `?wait=true` or
+  async).
+- New endpoint `GET /v1/tasks/{task_id}` — query task status and result.
+- New endpoint `PUT /v1/tasks/{task_id}/result` — Worker reports task result.
+- New endpoint `POST /v1/tasks/{task_id}/cancel` — request task cancellation.
+- `WorkerRuntimeUpdateRequest` gains an optional `plugins` field.
+- `Worker` response schema gains an optional `plugins` field.
+- Worker SSE stream now dispatches `task` events for work items.
+- Plugin error codes documented as `x-capown-plugin-error-codes`.
+- `plugin-protocol.md` finalized from draft.
+- Tags `plugins` and `tasks` added.
+
 ## 1.1.0 — 2026-07-17
 
 Renamed Worker enrollment to Worker registration (breaking change):

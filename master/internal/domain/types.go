@@ -253,6 +253,89 @@ func ValidateWorkerName(name string) string {
 	return ""
 }
 
+// --- Task types ---
+
+type TaskStatus string
+
+const (
+	TaskPending   TaskStatus = "pending"
+	TaskRunning   TaskStatus = "running"
+	TaskCompleted TaskStatus = "completed"
+	TaskFailed    TaskStatus = "failed"
+	TaskTimeout   TaskStatus = "timeout"
+	TaskCanceled  TaskStatus = "canceled"
+)
+
+// GenerateTaskID returns a task ID with "tsk_" prefix and 24 hex chars.
+func GenerateTaskID() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return "tsk_" + hex.EncodeToString(b)
+}
+
+// ContentBlock represents a plugin result content block.
+type ContentBlock struct {
+	Type  string      `json:"type"`
+	Text  string      `json:"text,omitempty"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+// PluginCallResult represents the result envelope for a plugin_call task.
+type PluginCallResult struct {
+	IsError           bool           `json:"is_error"`
+	Content           []ContentBlock `json:"content"`
+	StructuredContent interface{}    `json:"structured_content"`
+}
+
+// TaskResult is submitted by the Worker to report task completion.
+type TaskResult struct {
+	TaskID      string            `json:"task_id"`
+	WorkerID    string            `json:"worker_id"`
+	Status      TaskStatus        `json:"status"`
+	Result      *PluginCallResult `json:"result,omitempty"`
+	Error       *APIError         `json:"error,omitempty"`
+	StartedAt   *string           `json:"started_at"`
+	CompletedAt *string           `json:"completed_at"`
+	Truncated   bool              `json:"truncated"`
+}
+
+// Task represents a dispatched task.
+type Task struct {
+	TaskID        string      `json:"task_id"`
+	TargetWorker  string      `json:"target_worker"`
+	TaskType      string      `json:"task_type"`
+	Params        interface{} `json:"params,omitempty"`
+	Status        TaskStatus  `json:"status"`
+	TimeoutSecond int         `json:"timeout_seconds"`
+	CreatedAt     string      `json:"created_at"`
+	StartedAt     *string     `json:"started_at"`
+	CompletedAt   *string     `json:"completed_at"`
+	Result        interface{} `json:"result,omitempty"`
+	Error         *APIError   `json:"error,omitempty"`
+	Truncated     bool        `json:"truncated"`
+	OwnerUserID   string      `json:"-"`
+}
+
+// --- Plugin types ---
+
+// PluginToolInfo represents a discovered tool from a plugin.
+type PluginToolInfo struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema interface{} `json:"input_schema"`
+}
+
+// PluginInfo represents a plugin snapshot reported by the Worker.
+type PluginInfo struct {
+	PluginID  string           `json:"plugin_id"`
+	Version   string           `json:"version"`
+	Kind      string           `json:"kind"`
+	Transport string           `json:"transport"`
+	Status    string           `json:"status"`
+	Tools     []PluginToolInfo `json:"tools"`
+	Error     string           `json:"error"`
+}
+
 // Token prefixes
 const (
 	TokenPrefixRegister = "cown_register_"

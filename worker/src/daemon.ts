@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Worker Next daemon: main loop -- auth, runtime report, SSE, reconnect. */
+/** Worker Next daemon: main loop -- auth, runtime report, SSE, reconnect, tasks. */
 
 import { log } from "./logging.js";
 import { loadConfig, type WorkerNextConfig } from "./config.js";
@@ -10,6 +10,9 @@ import {
 import { MasterClient } from "./master-client.js";
 import { SSEClient } from "./sse.js";
 import { getPlatformInfo } from "./platform.js";
+import { PluginManager } from "./plugins/manager.js";
+import { PluginError, PluginErrorCodes } from "./plugins/errors.js";
+import type { TaskEvent, PluginCallParams, TaskResultReport } from "./protocol.js";
 
 // Backoff limits for reconnection
 const BACKOFF_BASE_MS = 1_000;
@@ -28,6 +31,9 @@ export class Daemon {
   private _config!: WorkerNextConfig;
   private _identity!: IdentityData;
   private _client!: MasterClient;
+  private _pluginManager!: PluginManager;
+  private _activeTasks = new Map<string, AbortController>();
+  private _unsubscribePluginSnapshots?: () => void;
 
   constructor(private readonly _opts: DaemonOptions) {}
 
@@ -48,6 +54,11 @@ export class Daemon {
         await this._mainLoop();
       }
     } finally {
+      this._unsubscribePluginSnapshots?.();
+      this._unsubscribePluginSnapshots = undefined;
+      if (this._pluginManager) {
+        await this._pluginManager.stopPlugins().catch(() => {});
+      }
       log.info("daemon: stopped");
       process.off("SIGINT", onSignal);
       process.off("SIGTERM", onSignal);
@@ -105,6 +116,25 @@ export class Daemon {
       platform.os,
       platform.arch,
     );
+
+    // Initialize plugin manager (config dir = parent of config file)
+    const { dirname } = await import("node:path");
+    const configDir = dirname(this._config.configPath);
+    this._pluginManager = new PluginManager(configDir);
+    await this._pluginManager.loadPlugins();
+    await this._pluginManager.startPlugins();
+    log.info(
+      "daemon: plugins loaded (%d plugins)",
+      this._pluginManager.getPluginSnapshots().length,
+    );
+
+    // Re-report runtime when plugin status changes
+    this._unsubscribePluginSnapshots = this._pluginManager.onSnapshotsChanged(() => {
+      if (!this._abort.signal.aborted && this._client.sessionToken && this._identity.workerId) {
+        const snapshots = this._pluginManager.getPluginSnapshots();
+        this._client.reportRuntime(this._identity.workerId, snapshots).catch(() => {});
+      }
+    });
   }
 
   // ------------------------------------------------------------------
@@ -129,8 +159,9 @@ export class Daemon {
         }
       }
 
-      // Step 2: Report runtime metadata
-      if (!(await this._client.reportRuntime(this._identity.workerId))) {
+      // Step 2: Report runtime metadata (with plugins)
+      const pluginSnapshots = this._pluginManager.getPluginSnapshots();
+      if (!(await this._client.reportRuntime(this._identity.workerId, pluginSnapshots))) {
         if (!this._client.sessionToken) continue;
         log.warn(
           "daemon: runtime report failed, will retry in %ds",
@@ -159,7 +190,24 @@ export class Daemon {
               consecutivePings = 0;
             }
           },
-          onEvent: (_event, _data) => {},
+          onEvent: (event, data) => {
+            if (event === "task") {
+              let taskEvent: TaskEvent;
+              try {
+                taskEvent = JSON.parse(data) as TaskEvent;
+              } catch {
+                log.error("daemon: failed to parse task event JSON");
+                return;
+              }
+              if (!this._isValidTaskEvent(taskEvent)) {
+                log.error("daemon: task event missing required fields");
+                return;
+              }
+              this._handleTaskEvent(taskEvent).catch((err) => {
+                log.error("daemon: task handler error: %s", err);
+              });
+            }
+          },
           signal: this._abort.signal,
         });
 
@@ -193,6 +241,108 @@ export class Daemon {
       this._identity.privateKeyHex,
     );
     return token !== null;
+  }
+
+  // ------------------------------------------------------------------
+  // Task handling
+  // ------------------------------------------------------------------
+
+  private async _handleTaskEvent(event: TaskEvent): Promise<void> {
+    if (event.task_type === "plugin_call") {
+      await this._handlePluginCall(event.task_id, event.params as unknown as PluginCallParams, event.timeout_seconds);
+    } else if (event.task_type === "task_cancel") {
+      const targetTaskId = (event.params as Record<string, string>).task_id;
+      log.info("daemon: cancel requested for task %s", targetTaskId);
+      const abort = this._activeTasks.get(targetTaskId);
+      if (abort) {
+        abort.abort();
+      }
+    } else {
+      log.warn("daemon: unknown task type %s", event.task_type);
+      await this._reportTaskResult(event.task_id, {
+        task_id: event.task_id,
+        worker_id: this._identity.workerId,
+        status: "failed",
+        error: {
+          code: "invalid_input",
+          message: `unsupported task type: ${event.task_type}`,
+          details: null,
+        },
+        truncated: false,
+      });
+    }
+  }
+
+  private async _handlePluginCall(
+    taskId: string,
+    params: PluginCallParams,
+    timeoutSeconds: number,
+  ): Promise<void> {
+    const startedAt = new Date().toISOString();
+    const taskAbort = new AbortController();
+    this._activeTasks.set(taskId, taskAbort);
+
+    try {
+      const result = await this._pluginManager.invokePlugin(
+        params.plugin_id,
+        params.tool_name,
+        params.arguments,
+        timeoutSeconds,
+        taskAbort.signal,
+      );
+
+      if (taskAbort.signal.aborted) {
+        return;
+      }
+
+      await this._reportTaskResult(taskId, {
+        task_id: taskId,
+        worker_id: this._identity.workerId,
+        status: "completed",
+        result,
+        started_at: startedAt,
+        completed_at: new Date().toISOString(),
+        truncated: false,
+      });
+    } catch (err) {
+      if (taskAbort.signal.aborted) {
+        return;
+      }
+      const errorCode = err instanceof PluginError ? err.code : PluginErrorCodes.PluginProtocolError;
+      const message = err instanceof PluginError ? err.safeMessage : "internal error";
+
+      await this._reportTaskResult(taskId, {
+        task_id: taskId,
+        worker_id: this._identity.workerId,
+        status: err instanceof PluginError && err.code === PluginErrorCodes.PluginTimeout ? "timeout" : "failed",
+        error: { code: errorCode, message, details: null },
+        started_at: startedAt,
+        completed_at: new Date().toISOString(),
+        truncated: false,
+      });
+    } finally {
+      this._activeTasks.delete(taskId);
+    }
+  }
+
+  private _isValidTaskEvent(value: unknown): value is TaskEvent {
+    if (!value || typeof value !== "object") return false;
+    const event = value as Record<string, unknown>;
+    return typeof event.task_id === "string" && /^tsk_[0-9a-f]{24}$/.test(event.task_id)
+      && typeof event.task_type === "string" && event.task_type.length > 0
+      && !!event.params && typeof event.params === "object" && !Array.isArray(event.params)
+      && typeof event.timeout_seconds === "number"
+      && Number.isInteger(event.timeout_seconds)
+      && event.timeout_seconds >= 1 && event.timeout_seconds <= 3600;
+  }
+
+  private async _reportTaskResult(taskId: string, report: TaskResultReport): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (await this._client.reportTaskResult(taskId, report)) return;
+      if (!this._client.sessionToken || attempt === 3) break;
+      await this._sleep(250 * attempt);
+    }
+    log.error("daemon: failed to report result for task %s", taskId);
   }
 
   // ------------------------------------------------------------------

@@ -11,6 +11,8 @@ import type {
   WorkerAuthVerifyResponse,
   WorkerReconnectRequest,
   WorkerInfo,
+  PluginInfoItem,
+  TaskResultReport,
 } from "./protocol.js";
 
 // --------------------------------------------------------------------------
@@ -239,7 +241,7 @@ export class MasterClient {
    * Returns true on success. On 401/403, clears the session token
    * (caller should re-authenticate).
    */
-  async reportRuntime(workerId: string): Promise<boolean> {
+  async reportRuntime(workerId: string, plugins?: PluginInfoItem[]): Promise<boolean> {
     const platform = getPlatformInfo();
     const body: WorkerReconnectRequest = {
       hostname: platform.hostname,
@@ -247,6 +249,7 @@ export class MasterClient {
       mode: "capability",
       capabilities: [],
       workspace: "",
+      plugins,
     };
 
     const url = buildUrl(
@@ -264,5 +267,25 @@ export class MasterClient {
       this._sessionToken = "";
     }
     return false;
+  }
+
+  // ------------------------------------------------------------------
+  // Task result
+  // ------------------------------------------------------------------
+
+  /** Report a task result back to the Master.
+   *
+   * Returns true on success.
+   */
+  async reportTaskResult(taskId: string, report: TaskResultReport): Promise<boolean> {
+    const url = buildUrl(
+      this._opts.masterUrl,
+      "/v1/tasks/" + encodeURIComponent(taskId) + "/result",
+    );
+    const result = await doPut<{ status: string }>(url, report, this._authHeaders());
+    if (!result.ok && (result.status === 401 || result.status === 403)) {
+      this._sessionToken = "";
+    }
+    return result.ok;
   }
 }

@@ -264,12 +264,6 @@ export class SSEClient {
       return;
     }
 
-    log.warn(
-      "sse: unexpected event (type=%s, size=%d bytes) -- ignoring (no task execution in this milestone)",
-      evt.event,
-      evt.data.length,
-    );
-
     this._opts.onEvent(evt.event, evt.data);
   }
 }

@@ -67,6 +67,7 @@ export interface WorkerReconnectRequest {
   mode: string;
   capabilities: string[];
   workspace: string;
+  plugins?: PluginInfoItem[];
 }
 
 // --------------------------------------------------------------------------
@@ -84,7 +85,76 @@ export interface WorkerInfo {
   status: "online" | "offline";
   last_heartbeat: string | null;
   registered_at: string | null;
+  plugins?: PluginInfoItem[];
 }
+
+// --------------------------------------------------------------------------
+// Plugin types
+// --------------------------------------------------------------------------
+
+export interface PluginToolInfoItem {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+export interface PluginInfoItem {
+  plugin_id: string;
+  version: string;
+  kind: string;
+  transport: string;
+  status: PluginStatus;
+  tools: PluginToolInfoItem[];
+  error: string;
+}
+
+export type PluginStatus = "starting" | "running" | "stopped" | "error" | "disabled";
+
+// --------------------------------------------------------------------------
+// Task types (v1.2)
+// --------------------------------------------------------------------------
+
+export interface TaskEvent {
+  task_id: string;
+  task_type: string;
+  params: Record<string, unknown>;
+  timeout_seconds: number;
+}
+
+export interface PluginCallParams {
+  plugin_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ContentBlock {
+  type: "text" | "json";
+  text?: string;
+  value?: unknown;
+}
+
+export interface PluginCallResult {
+  is_error: boolean;
+  content: ContentBlock[];
+  structured_content: unknown;
+}
+
+export interface TaskResultReport {
+  task_id: string;
+  worker_id: string;
+  status: TaskStatus;
+  result?: PluginCallResult;
+  error?: {
+    code: string;
+    message: string;
+    details: unknown;
+  };
+  started_at?: string;
+  completed_at?: string;
+  truncated: boolean;
+}
+
+export type TaskStatus = "pending" | "running" | "completed" | "failed" | "timeout" | "canceled";
 
 // --------------------------------------------------------------------------
 // API error envelope

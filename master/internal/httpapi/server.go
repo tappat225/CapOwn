@@ -14,6 +14,7 @@ import (
 	"github.com/capown/master/internal/events"
 	"github.com/capown/master/internal/service"
 	"github.com/capown/master/internal/store"
+	"github.com/capown/master/internal/tasks"
 )
 
 // Server holds all dependencies for the HTTP API.
@@ -27,6 +28,7 @@ type Server struct {
 	mux            *http.ServeMux
 	srv            *http.Server
 	pwHashSem      chan struct{} // semaphore for password hashing concurrency
+	taskStore      *tasks.Store
 }
 
 // NewServer creates a new Server with all dependencies.
@@ -48,6 +50,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	)
 	wb := broker.NewWorkerBroker(cfg.Master.MaxWorkerEventQueues, 64)
 	db := events.NewDashboardBus(64, cfg.Master.MaxDashboardSubscribers)
+	ts := tasks.NewStore()
 
 	s := &Server{
 		config:         cfg,
@@ -58,6 +61,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		dashBus:        db,
 		mux:            http.NewServeMux(),
 		pwHashSem:      make(chan struct{}, cfg.Master.PasswordHashConcurrency),
+		taskStore:      ts,
 	}
 
 	s.registerRoutes()
@@ -151,6 +155,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}", s.handlePatchWorker)
 	s.mux.HandleFunc("DELETE /v1/workers/{worker_id}", s.handleDeleteWorker)
 	s.mux.HandleFunc("GET /v1/workers", s.handleListWorkers)
+
+	// Plugin routes
+	s.mux.HandleFunc("GET /v1/workers/{worker_id}/plugins", s.handleListWorkerPlugins)
+
+	// Task routes
+	s.mux.HandleFunc("POST /v1/tasks", s.handleDispatchTask)
+	s.mux.HandleFunc("GET /v1/tasks/{task_id}", s.handleGetTask)
+	s.mux.HandleFunc("PUT /v1/tasks/{task_id}/result", s.handleReportTaskResult)
+	s.mux.HandleFunc("POST /v1/tasks/{task_id}/cancel", s.handleCancelTask)
 
 	// Dashboard events
 	s.mux.HandleFunc("GET /v1/events", s.handleDashboardEvents)

@@ -34,6 +34,19 @@ const (
 	ErrRegistrationExhausted = "registration_exhausted"
 	ErrRateLimited           = "rate_limited"
 	ErrUserDisabled          = "user_disabled"
+
+	// Plugin error codes
+	ErrPluginNotFound          = "plugin_not_found"
+	ErrPluginDisabled          = "plugin_disabled"
+	ErrPluginUnavailable       = "plugin_unavailable"
+	ErrPluginToolNotFound      = "plugin_tool_not_found"
+	ErrPluginSchemaInvalid     = "plugin_schema_invalid"
+	ErrPluginTimeout           = "plugin_timeout"
+	ErrPluginCanceled          = "plugin_canceled"
+	ErrPluginOutputTooLarge    = "plugin_output_too_large"
+	ErrPluginProtocolError     = "plugin_protocol_error"
+	ErrPluginConcurrencyExceeded = "plugin_concurrency_exceeded"
+	ErrWorkerOffline           = "worker_offline"
 )
 
 // NewAPIError creates a new APIError with the given code, message, and HTTP status.

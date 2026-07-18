@@ -156,6 +156,7 @@ func (s *Store) initDB() error {
 	}{
 		{"previous_worker_name", "TEXT"},
 		{"renamed_at", "TEXT"},
+		{"plugins", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		exists, err := s.columnExists("workers", migration.column)
 		if err != nil {

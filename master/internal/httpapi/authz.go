@@ -146,6 +146,49 @@ func (s *Server) resolveWorkerSession(r *http.Request, workerID string) (*AuthCo
 	}, nil
 }
 
+// resolveClientAPI accepts web, client, and admin tokens. Rejects worker sessions.
+func (s *Server) resolveClientAPI(r *http.Request) (*AuthContext, *domain.APIError) {
+	token := getBearerToken(r)
+	if token == "" {
+		return nil, domain.NewAPIError(domain.ErrUnauthorized, "missing authorization header", http.StatusUnauthorized)
+	}
+
+	if strings.HasPrefix(token, "cown_sess_") {
+		return nil, domain.NewAPIError(domain.ErrForbidden, "worker sessions cannot access this endpoint", http.StatusForbidden)
+	}
+
+	if strings.HasPrefix(token, "cown_web_") {
+		return s.resolveWebSession(r)
+	}
+
+	tok, err := s.store.ValidateToken(token)
+	if err != nil {
+		return nil, domain.NewAPIError(domain.ErrInternal, "internal error", http.StatusInternalServerError)
+	}
+	if tok == nil {
+		return nil, domain.NewAPIError(domain.ErrUnauthorized, "invalid token", http.StatusUnauthorized)
+	}
+	if tok.TokenType != "client" && tok.TokenType != "admin" {
+		return nil, domain.NewAPIError(domain.ErrForbidden, "token type cannot access this endpoint", http.StatusForbidden)
+	}
+
+	user, err := s.store.GetUserByID(tok.UserID)
+	if err != nil || user == nil {
+		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
+	}
+	if user.Status == "disabled" {
+		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	}
+
+	return &AuthContext{
+		TokenType: tok.TokenType,
+		TokenID:   tok.TokenID,
+		UserID:    user.UserID,
+		Username:  user.Username,
+		Role:      user.Role,
+	}, nil
+}
+
 // resolveAPI accepts any valid token type for general API access.
 func (s *Server) resolveAPI(r *http.Request) (*AuthContext, *domain.APIError) {
 	token := getBearerToken(r)

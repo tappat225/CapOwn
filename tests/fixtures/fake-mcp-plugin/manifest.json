@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "plugin_id": "fake-test",
+  "version": "1.0.0",
+  "display_name": "Fake Test Plugin",
+  "description": "Fake MCP plugin for E2E testing",
+  "kind": "mcp",
+  "transport": "stdio",
+  "enabled": true,
+  "command": ["python", "./tests/fixtures/fake-mcp-plugin/server.py"],
+  "limits": {
+    "startup_timeout_seconds": 10,
+    "call_timeout_seconds": 30,
+    "max_output_bytes": 100000,
+    "max_concurrency": 4
+  }
+}

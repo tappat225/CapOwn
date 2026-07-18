@@ -18,6 +18,10 @@ The implementation source files are not protocol definitions. They are
 implementations of this contract and may add internal fields or behavior only
 when that behavior is not observable on the wire.
 
+The plugin extension is documented in
+[`plugin-protocol.md`](./plugin-protocol.md) and is included in
+`openapi.yaml` starting from v1.2.
+
 ## Scope of v1.1
 
 v1.1 renames Worker enrollment to Worker registration:
@@ -40,9 +44,9 @@ v1.1 still covers the connectivity milestone:
 - Worker-to-Master SSE; and
 - dashboard SSE events.
 
-Task dispatch, task results, task history, cancellation, file/shell execution,
-and plugin invocation are deliberately not part of v1.x. They require a later
-protocol extension covering both the Master and Worker sides.
+v1.2 adds plugin discovery, task dispatch, task results, and task cancellation.
+The first supported task type is `plugin_call`. Only MCP-over-stdio plugins
+are supported in this version.
 
 ## Versioning policy
 

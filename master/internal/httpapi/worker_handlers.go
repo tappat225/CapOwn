@@ -37,11 +37,12 @@ type authSessionRequest struct {
 
 // Runtime update request
 type runtimeUpdateRequest struct {
-	Hostname     string   `json:"hostname"`
-	OS           string   `json:"os"`
-	Mode         string   `json:"mode"`
-	Capabilities []string `json:"capabilities"`
-	Workspace    string   `json:"workspace"`
+	Hostname     string               `json:"hostname"`
+	OS           string               `json:"os"`
+	Mode         string               `json:"mode"`
+	Capabilities []string             `json:"capabilities"`
+	Workspace    string               `json:"workspace"`
+	Plugins      *[]domain.PluginInfo `json:"plugins,omitempty"`
 }
 
 func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +247,35 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 		mode = "capability"
 	}
 
-	_, becameOnline, err := s.store.ReconnectWorker(workerID, req.Hostname, req.OS, mode, capStr, req.Workspace)
+	pluginsStr := ""
+	if req.Plugins != nil {
+		for _, plugin := range *req.Plugins {
+			if plugin.PluginID == "" || plugin.Version == "" || plugin.Kind == "" || plugin.Transport == "" {
+				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin metadata is incomplete")
+				return
+			}
+			switch plugin.Status {
+			case "starting", "running", "stopped", "error", "disabled":
+			default:
+				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid plugin status")
+				return
+			}
+			for _, tool := range plugin.Tools {
+				if tool.Name == "" {
+					writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin tool name is required")
+					return
+				}
+			}
+		}
+		encoded, err := json.Marshal(req.Plugins)
+		if err != nil {
+			writeError(w, domain.ErrInternalResponse)
+			return
+		}
+		pluginsStr = string(encoded)
+	}
+
+	_, becameOnline, err := s.store.ReconnectWorker(workerID, req.Hostname, req.OS, mode, capStr, req.Workspace, pluginsStr)
 	if err != nil {
 		slog.Error("runtime update failed", "worker_id", workerID, "error", err)
 		writeErrorCode(w, http.StatusNotFound, domain.ErrWorkerNotFound, "worker not found")
