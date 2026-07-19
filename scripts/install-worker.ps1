@@ -10,27 +10,30 @@
 
 $ErrorActionPreference = "Stop"
 
-# --- Configuration ---
+# --- Configuration and arguments ---
 $Prefix = Join-Path $HOME ".capown"
-$WorkerSrc = Join-Path $PSScriptRoot "..\worker"
+$WorkerSrc = (Resolve-Path (Join-Path $PSScriptRoot "..\worker")).Path
+
+for ($i = 0; $i -lt $args.Count; $i++) {
+    switch ($args[$i]) {
+        "--prefix" {
+            if ($i + 1 -ge $args.Count) {
+                throw "--prefix requires a directory"
+            }
+            $Prefix = $args[++$i]
+        }
+        "--help" { Get-Content $PSCommandPath | Select-Object -First 9; exit 0 }
+        "-h" { Get-Content $PSCommandPath | Select-Object -First 9; exit 0 }
+        default { throw "Unknown option: $($args[$i])" }
+    }
+}
+
 $AppDir = Join-Path $Prefix "worker\app"
 $BinDir = Join-Path $Prefix "bin"
 $ConfigDir = Join-Path $Prefix "worker"
 $ConfigFile = Join-Path $ConfigDir "config.toml"
 $IdentityFile = Join-Path $ConfigDir "identity.toml"
 $Launcher = Join-Path $BinDir "capown-worker.cmd"
-
-# --- Parse args ---
-if ($args -contains "--prefix") {
-    $idx = [array]::IndexOf($args, "--prefix")
-    $Prefix = $args[$idx + 1]
-    $AppDir = Join-Path $Prefix "worker\app"
-    $BinDir = Join-Path $Prefix "bin"
-    $ConfigDir = Join-Path $Prefix "worker"
-    $ConfigFile = Join-Path $ConfigDir "config.toml"
-    $IdentityFile = Join-Path $ConfigDir "identity.toml"
-    $Launcher = Join-Path $BinDir "capown-worker.cmd"
-}
 
 Write-Output "CapOwn Worker Next Installer"
 Write-Output "============================"
@@ -59,46 +62,53 @@ if ($major -lt 20 -or ($major -eq 20 -and $minor -lt 18)) {
     exit 1
 }
 
-$npmExe = Get-Command "npm" -ErrorAction SilentlyContinue
+$npmExe = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
 if (-not $npmExe) {
     Write-Error "npm is not installed."
     exit 1
 }
 
-$npmVersion = & npm --version
+$npmVersion = & $npmExe.Source --version
 Write-Output "npm version:     $npmVersion"
 
 # --- Create directories ---
-New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 
-# --- Copy source files (exclude node_modules, dist) ---
+# --- Copy and build in a fresh staging directory ---
 Write-Output ""
 Write-Output "Copying Worker source..."
-Get-ChildItem -Path $WorkerSrc -Exclude "node_modules", "dist", ".env" | ForEach-Object {
-    $dest = Join-Path $AppDir $_.Name
-    if ($_.PSIsContainer) {
-        Copy-Item -Path $_.FullName -Destination $dest -Recurse -Force
-    } else {
-        Copy-Item -Path $_.FullName -Destination $dest -Force
-    }
-}
+$StageDir = Join-Path $ConfigDir (".app-install-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $StageDir | Out-Null
 
-# --- Install dependencies and build ---
-Write-Output ""
-Write-Output "Installing npm dependencies..."
-Push-Location $AppDir
 try {
-    & npm ci
-    if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+    Get-ChildItem -Path $WorkerSrc -Exclude "node_modules", "dist", ".env" | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $StageDir -Recurse -Force
+    }
 
     Write-Output ""
-    Write-Output "Building TypeScript..."
-    & npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+    Write-Output "Installing npm dependencies..."
+    Push-Location $StageDir
+    try {
+        & $npmExe.Source ci
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+
+        Write-Output ""
+        Write-Output "Building TypeScript..."
+        & $npmExe.Source run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+    } finally {
+        Pop-Location
+    }
+
+    if (Test-Path $AppDir) {
+        Remove-Item -LiteralPath $AppDir -Recurse -Force
+    }
+    Move-Item -LiteralPath $StageDir -Destination $AppDir
 } finally {
-    Pop-Location
+    if (Test-Path $StageDir) {
+        Remove-Item -LiteralPath $StageDir -Recurse -Force
+    }
 }
 
 # --- Create launcher ---
@@ -107,7 +117,8 @@ Write-Output "Creating launcher: $Launcher"
 @"
 @echo off
 REM CapOwn Worker Next launcher
-node "%~dp0..\worker\app\dist\src\cli.js" %*
+set "CAPOWN_WORKER_DIR=%~dp0..\worker"
+node "%CAPOWN_WORKER_DIR%\app\dist\src\cli.js" --config "%CAPOWN_WORKER_DIR%\config.toml" --identity "%CAPOWN_WORKER_DIR%\identity.toml" %*
 "@ | Out-File -FilePath $Launcher -Encoding ascii
 
 # --- Copy default config if not present ---
@@ -147,9 +158,29 @@ Write-Output ""
 Write-Output "Make sure $BinDir is in your PATH:"
 Write-Output "  `$env:Path = `"$BinDir;`$env:Path`""
 Write-Output ""
-Write-Output "Next steps:"
-Write-Output "  1. Register with a Master:"
-Write-Output "     capown-worker register https://<master>/v1/worker-registrations/<token>"
-Write-Output ""
-Write-Output "  2. Start the daemon:"
-Write-Output "     capown-worker daemon"
+$HasRegistration = $false
+if (Test-Path $IdentityFile) {
+    $HasRegistration = [bool](Select-String -Path $IdentityFile -Pattern '^\s*worker_id\s*=\s*["''][^"'']+["'']\s*(?:#.*)?$' -Quiet)
+}
+
+if ($HasRegistration) {
+    Write-Output "Existing Worker registration preserved."
+    Write-Output "Start the Worker in the background:"
+    Write-Output "  capown-worker start"
+    Write-Output "  capown-worker status"
+    Write-Output "  capown-worker logs"
+    Write-Output "  capown-worker stop"
+    Write-Output ""
+    Write-Output "To replace the registration, run:"
+    Write-Output "  capown-worker register https://<master>/v1/worker-registrations/<token>"
+} else {
+    Write-Output "Next steps:"
+    Write-Output "  1. Register with a Master:"
+    Write-Output "     capown-worker register https://<master>/v1/worker-registrations/<token>"
+    Write-Output ""
+    Write-Output "  2. Start the Worker:"
+    Write-Output "     capown-worker start"
+    Write-Output "     capown-worker status"
+    Write-Output "     capown-worker logs"
+    Write-Output "     capown-worker stop"
+}

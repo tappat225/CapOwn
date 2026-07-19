@@ -13,27 +13,24 @@
 set -euo pipefail
 
 # --- Configuration ---
-PREFIX="${HOME:-$HOME}/.capown"
-WORKER_SRC="$(cd "$(dirname "$0")/../worker" && pwd)"
-APP_DIR="${PREFIX}/worker/app"
-BIN_DIR="${PREFIX}/bin"
-CONFIG_DIR="${PREFIX}/worker"
-CONFIG_FILE="${CONFIG_DIR}/config.toml"
-IDENTITY_FILE="${CONFIG_DIR}/identity.toml"
-LAUNCHER="${BIN_DIR}/capown-worker"
+PREFIX="${HOME}/.capown"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKER_SRC="$(cd "${SCRIPT_DIR}/../worker" && pwd)"
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --prefix requires a directory" >&2
+        exit 1
+      fi
       PREFIX="$2"
-      APP_DIR="${PREFIX}/worker/app"
-      BIN_DIR="${PREFIX}/bin"
-      CONFIG_DIR="${PREFIX}/worker"
-      CONFIG_FILE="${CONFIG_DIR}/config.toml"
-      IDENTITY_FILE="${CONFIG_DIR}/identity.toml"
-      LAUNCHER="${BIN_DIR}/capown-worker"
       shift 2
+      ;;
+    --help|-h)
+      sed -n '1,12p' "$0"
+      exit 0
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -41,6 +38,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+APP_DIR="${PREFIX}/worker/app"
+BIN_DIR="${PREFIX}/bin"
+CONFIG_DIR="${PREFIX}/worker"
+CONFIG_FILE="${CONFIG_DIR}/config.toml"
+IDENTITY_FILE="${CONFIG_DIR}/identity.toml"
+LAUNCHER="${BIN_DIR}/capown-worker"
 
 echo "CapOwn Worker Next Installer"
 echo "============================"
@@ -77,35 +81,48 @@ NPM_VERSION="$(npm --version)"
 echo "npm version:     ${NPM_VERSION}"
 
 # --- Create directories ---
-mkdir -p "${APP_DIR}" "${BIN_DIR}" "${CONFIG_DIR}"
+mkdir -p "${BIN_DIR}" "${CONFIG_DIR}"
 
-# --- Copy source files ---
+# --- Copy and build in a fresh staging directory ---
 echo ""
 echo "Copying Worker source..."
+STAGE_DIR="$(mktemp -d "${CONFIG_DIR}/.app-install.XXXXXX")"
+cleanup() {
+  if [[ -n "${STAGE_DIR:-}" && -d "${STAGE_DIR}" ]]; then
+    rm -rf -- "${STAGE_DIR}"
+  fi
+}
+trap cleanup EXIT
+
 # Use rsync or cp -a
 if command -v rsync &>/dev/null; then
-  rsync -a --delete \
+  rsync -a \
     --exclude='node_modules' \
     --exclude='dist' \
     --exclude='.env' \
-    "${WORKER_SRC}/" "${APP_DIR}/"
+    "${WORKER_SRC}/" "${STAGE_DIR}/"
 else
   # Fallback: copy with tar
   tar -c \
     --exclude='node_modules' \
     --exclude='dist' \
     --exclude='.env' \
-    -C "${WORKER_SRC}" . | tar -xC "${APP_DIR}"
+    -C "${WORKER_SRC}" . | tar -xC "${STAGE_DIR}"
 fi
 
 # --- Install dependencies and build ---
 echo ""
 echo "Installing npm dependencies..."
-cd "${APP_DIR}"
+cd "${STAGE_DIR}"
 npm ci
 echo ""
 echo "Building TypeScript..."
 npm run build
+
+rm -rf -- "${APP_DIR}"
+mv "${STAGE_DIR}" "${APP_DIR}"
+STAGE_DIR=""
+trap - EXIT
 
 # --- Create launcher ---
 echo ""
@@ -115,7 +132,11 @@ cat > "${LAUNCHER}" << 'LAUNCHER_EOF'
 # CapOwn Worker Next launcher
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/../worker/app" && pwd)"
-exec node "${APP_DIR}/dist/src/cli.js" "$@"
+WORKER_DIR="$(cd "${APP_DIR}/.." && pwd)"
+exec node "${APP_DIR}/dist/src/cli.js" \
+  --config "${WORKER_DIR}/config.toml" \
+  --identity "${WORKER_DIR}/identity.toml" \
+  "$@"
 LAUNCHER_EOF
 chmod +x "${LAUNCHER}"
 
@@ -155,9 +176,25 @@ echo ""
 echo "Make sure ${BIN_DIR} is in your PATH:"
 echo "  export PATH=\"${BIN_DIR}:\$PATH\""
 echo ""
-echo "Next steps:"
-echo "  1. Register with a Master:"
-echo "     capown-worker register https://<master>/v1/worker-registrations/<token>"
-echo ""
-echo "  2. Start the daemon:"
-echo "     capown-worker daemon"
+if [[ -f "${IDENTITY_FILE}" ]] && \
+   grep -Eq '^[[:space:]]*worker_id[[:space:]]*=[[:space:]]*["'"'][^"'"']+["'"'][[:space:]]*(#.*)?$' "${IDENTITY_FILE}"; then
+  echo "Existing Worker registration preserved."
+  echo "Start the Worker in the background:"
+  echo "  capown-worker start"
+  echo "  capown-worker status"
+  echo "  capown-worker logs"
+  echo "  capown-worker stop"
+  echo ""
+  echo "To replace the registration, run:"
+  echo "  capown-worker register https://<master>/v1/worker-registrations/<token>"
+else
+  echo "Next steps:"
+  echo "  1. Register with a Master:"
+  echo "     capown-worker register https://<master>/v1/worker-registrations/<token>"
+  echo ""
+  echo "  2. Start the Worker:"
+  echo "     capown-worker start"
+  echo "     capown-worker status"
+  echo "     capown-worker logs"
+  echo "     capown-worker stop"
+fi

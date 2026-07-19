@@ -213,7 +213,7 @@ def main() -> int:
         # 7. Start Worker
         print("[e2e] Step 7: Starting Worker...")
         worker_proc = subprocess.Popen(
-            ["node", "dist/src/cli.js", "daemon"],
+            ["node", "dist/src/cli.js", "start", "--foreground"],
             cwd=WORKER_DIR,
             env={
                 **os.environ,
@@ -225,7 +225,7 @@ def main() -> int:
         )
 
         # 8. Wait for the Worker runtime report. Registration initially creates
-        # an online row, so status alone does not prove the daemon connected.
+        # an online row, so status alone does not prove the Worker connected.
         print("[e2e] Step 8: Waiting for worker runtime report...")
         worker_online = False
         plugins: list[dict[str, object]] = []

@@ -6,28 +6,35 @@ import { loadManifests } from "./manifest.js";
 import { PluginRegistry } from "./registry.js";
 import type { PluginInfo, PluginCallResult, ContentBlock } from "./types.js";
 import { PluginError, PluginErrorCodes } from "./errors.js";
+import { provisionDefaultPlugins } from "./defaults.js";
 
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_DELAY_MS = 2000;
 
 export class PluginManager {
   private registry = new PluginRegistry();
+  private configDir: string;
   private pluginsDir: string;
   private restartCounts = new Map<string, number>();
   private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(configDir: string) {
+    this.configDir = configDir;
     this.pluginsDir = join(configDir, "plugins.d");
   }
 
   async loadPlugins(): Promise<void> {
+    await provisionDefaultPlugins(this.configDir);
     const manifests = await loadManifests(this.pluginsDir);
 
     for (const loaded of manifests) {
       try {
         this.registry.register(loaded.manifest, loaded.path);
       } catch (err) {
-        console.warn(`[plugins] failed to register "${loaded.manifest.plugin_id}":`, (err as Error).message);
+        console.warn(
+          `[plugins] failed to register "${loaded.manifest.plugin_id}":`,
+          (err as Error).message,
+        );
       }
     }
 
@@ -64,10 +71,16 @@ export class PluginManager {
     return this.registry.onSnapshotsChanged(listener);
   }
 
-  async setPluginEnabled(pluginId: string, enabled: boolean): Promise<PluginInfo> {
+  async setPluginEnabled(
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<PluginInfo> {
     const plugin = this.registry.get(pluginId);
     if (!plugin) {
-      throw new PluginError(PluginErrorCodes.PluginNotFound, `plugin "${pluginId}" not found`);
+      throw new PluginError(
+        PluginErrorCodes.PluginNotFound,
+        `plugin "${pluginId}" not found`,
+      );
     }
 
     await this.persistEnabled(plugin.manifestPath, enabled);
@@ -89,12 +102,20 @@ export class PluginManager {
     return plugin.adapter.getInfo();
   }
 
-  private async persistEnabled(manifestPath: string, enabled: boolean): Promise<void> {
-    const raw = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+  private async persistEnabled(
+    manifestPath: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const raw = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<
+      string,
+      unknown
+    >;
     raw.enabled = enabled;
     const temporaryPath = `${manifestPath}.tmp-${process.pid}-${Date.now()}`;
     try {
-      await writeFile(temporaryPath, JSON.stringify(raw, null, 2) + "\n", { encoding: "utf-8" });
+      await writeFile(temporaryPath, JSON.stringify(raw, null, 2) + "\n", {
+        encoding: "utf-8",
+      });
       await rename(temporaryPath, manifestPath);
     } catch (error) {
       await rm(temporaryPath, { force: true }).catch(() => {});
@@ -109,42 +130,76 @@ export class PluginManager {
     timeoutSeconds?: number,
     signal?: AbortSignal,
   ): Promise<PluginCallResult> {
-    if (typeof pluginId !== "string" || pluginId.length === 0
-      || typeof toolName !== "string" || toolName.length === 0
-      || !args || typeof args !== "object" || Array.isArray(args)) {
-      throw new PluginError(PluginErrorCodes.PluginSchemaInvalid,
-        "plugin call parameters are invalid");
+    if (
+      typeof pluginId !== "string" ||
+      pluginId.length === 0 ||
+      typeof toolName !== "string" ||
+      toolName.length === 0 ||
+      !args ||
+      typeof args !== "object" ||
+      Array.isArray(args)
+    ) {
+      throw new PluginError(
+        PluginErrorCodes.PluginSchemaInvalid,
+        "plugin call parameters are invalid",
+      );
     }
     const plugin = this.registry.get(pluginId);
     if (!plugin) {
-      throw new PluginError(PluginErrorCodes.PluginNotFound,
-        `plugin "${pluginId}" not found`);
+      throw new PluginError(
+        PluginErrorCodes.PluginNotFound,
+        `plugin "${pluginId}" not found`,
+      );
     }
 
     if (plugin.manifest.enabled === false) {
-      throw new PluginError(PluginErrorCodes.PluginDisabled,
-        `plugin "${pluginId}" is disabled`);
+      throw new PluginError(
+        PluginErrorCodes.PluginDisabled,
+        `plugin "${pluginId}" is disabled`,
+      );
     }
 
     if (!plugin.adapter.isHealthy) {
-      throw new PluginError(PluginErrorCodes.PluginUnavailable,
-        `plugin "${pluginId}" is not available (status: ${plugin.adapter.status})`);
+      throw new PluginError(
+        PluginErrorCodes.PluginUnavailable,
+        `plugin "${pluginId}" is not available (status: ${plugin.adapter.status})`,
+      );
     }
 
-    const mcpResult = await plugin.adapter.invoke(toolName, args, timeoutSeconds, signal);
+    const mcpResult = await plugin.adapter.invoke(
+      toolName,
+      args,
+      timeoutSeconds,
+      signal,
+    );
 
     if (!mcpResult || !Array.isArray(mcpResult.content)) {
-      throw new PluginError(PluginErrorCodes.PluginProtocolError,
-        "plugin returned an invalid result", "plugin returned an invalid result");
+      throw new PluginError(
+        PluginErrorCodes.PluginProtocolError,
+        "plugin returned an invalid result",
+        "plugin returned an invalid result",
+      );
     }
-    if (mcpResult.isError !== undefined && typeof mcpResult.isError !== "boolean") {
-      throw new PluginError(PluginErrorCodes.PluginProtocolError,
-        "plugin returned an invalid isError value", "plugin returned an invalid result");
+    if (
+      mcpResult.isError !== undefined &&
+      typeof mcpResult.isError !== "boolean"
+    ) {
+      throw new PluginError(
+        PluginErrorCodes.PluginProtocolError,
+        "plugin returned an invalid isError value",
+        "plugin returned an invalid result",
+      );
     }
-    if (mcpResult.structuredContent !== undefined
-      && (!mcpResult.structuredContent || typeof mcpResult.structuredContent !== "object")) {
-      throw new PluginError(PluginErrorCodes.PluginProtocolError,
-        "plugin returned invalid structuredContent", "plugin returned an invalid result");
+    if (
+      mcpResult.structuredContent !== undefined &&
+      (!mcpResult.structuredContent ||
+        typeof mcpResult.structuredContent !== "object")
+    ) {
+      throw new PluginError(
+        PluginErrorCodes.PluginProtocolError,
+        "plugin returned invalid structuredContent",
+        "plugin returned an invalid result",
+      );
     }
 
     const content: ContentBlock[] = mcpResult.content.map((block) => {
@@ -158,14 +213,17 @@ export class PluginManager {
       if (block.type === "text" && typeof block.text === "string") {
         return { type: "text" as const, text: block.text };
       }
-      throw new PluginError(PluginErrorCodes.PluginProtocolError,
+      throw new PluginError(
+        PluginErrorCodes.PluginProtocolError,
         "plugin returned an unsupported content block",
-        "plugin returned unsupported content");
+        "plugin returned unsupported content",
+      );
     });
 
-    const structured = mcpResult.structuredContent
-      ?? content.find((c) => c.type === "json")?.value
-      ?? null;
+    const structured =
+      mcpResult.structuredContent ??
+      content.find((c) => c.type === "json")?.value ??
+      null;
 
     const result: PluginCallResult = {
       is_error: mcpResult.isError ?? false,
@@ -175,8 +233,10 @@ export class PluginManager {
 
     const maxOutputBytes = plugin.manifest.limits?.max_output_bytes ?? 200_000;
     if (Buffer.byteLength(JSON.stringify(result), "utf-8") > maxOutputBytes) {
-      throw new PluginError(PluginErrorCodes.PluginOutputTooLarge,
-        `plugin ${pluginId} output exceeds ${maxOutputBytes} bytes`);
+      throw new PluginError(
+        PluginErrorCodes.PluginOutputTooLarge,
+        `plugin ${pluginId} output exceeds ${maxOutputBytes} bytes`,
+      );
     }
 
     return result;
@@ -187,11 +247,15 @@ export class PluginManager {
     this.restartCounts.set(pluginId, count);
 
     if (count > MAX_RESTART_ATTEMPTS) {
-      console.error(`[plugins] "${pluginId}" exceeded max restart attempts (${MAX_RESTART_ATTEMPTS})`);
+      console.error(
+        `[plugins] "${pluginId}" exceeded max restart attempts (${MAX_RESTART_ATTEMPTS})`,
+      );
       return;
     }
 
-    console.log(`[plugins] restarting "${pluginId}" (attempt ${count}/${MAX_RESTART_ATTEMPTS})...`);
+    console.log(
+      `[plugins] restarting "${pluginId}" (attempt ${count}/${MAX_RESTART_ATTEMPTS})...`,
+    );
 
     const timer = setTimeout(async () => {
       this.restartTimers.delete(pluginId);
@@ -203,7 +267,10 @@ export class PluginManager {
         // Reset restart count on successful restart
         this.restartCounts.delete(pluginId);
       } catch (err) {
-        console.error(`[plugins] restart of "${pluginId}" failed:`, (err as Error).message);
+        console.error(
+          `[plugins] restart of "${pluginId}" failed:`,
+          (err as Error).message,
+        );
       }
     }, RESTART_DELAY_MS);
 

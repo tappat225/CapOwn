@@ -99,7 +99,7 @@ interface FlatToml {
 
 function parseTomlFile(filePath: string): FlatToml {
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
+    const raw = fs.readFileSync(filePath, "utf-8").replace(/^\uFEFF/, "");
     const parsed = TOML.parse(raw) as Record<string, unknown>;
 
     // The existing config has top-level keys (master_url, worker_name, ...)

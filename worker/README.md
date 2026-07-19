@@ -40,15 +40,53 @@ bash ../scripts/install-worker.sh
 # Register with a Master
 capown-worker register https://master.example.com/v1/worker-registrations/<token>
 
-# Start daemon
-capown-worker daemon
+# Start Worker in the background
+capown-worker start
+
+# Run Worker in the current terminal
+capown-worker start --foreground
 
 # Check status
 capown-worker status
 
+# Stop the background Worker
+capown-worker stop
+
+# Show the latest 200 log lines
+capown-worker logs
+
+# Show a custom number of log lines
+capown-worker logs --lines 50
+
 # Show config
 capown-worker config show
 ```
+
+## Default filesystem plugin
+
+The Worker includes the third-party
+`@modelcontextprotocol/server-filesystem` MCP server. On the first Worker
+startup, the Worker creates an enabled `filesystem` plugin manifest at:
+
+```text
+~/.capown/worker/plugins.d/filesystem.json
+```
+
+The plugin is restricted to the following default directory:
+
+```text
+~/.capown/worker/workspace
+```
+
+The directory is created automatically. The Worker does not replace an
+existing valid plugin whose `plugin_id` is `filesystem`, and it does not
+recreate the default after it has been provisioned and later removed. Plugin
+metadata and discovered tools are reported to the Master through the normal
+runtime heartbeat and are visible in Dashboard.
+
+The manifest permissions describe the intended access boundary. The current
+Worker does not provide an operating-system sandbox, so the third-party plugin
+process must still be treated as trusted local code.
 
 ### Configuration
 
@@ -68,7 +106,7 @@ interoperable with PyNaCl. Use `--identity <path>` or `CAPOWN_WORKER_IDENTITY`
 for isolated testing.
 
 The `register` command saves the `worker_id` and `worker_name` to the identity
-file after a successful registration. The daemon then only needs the identity
+file after a successful registration. The Worker then only needs the identity
 to authenticate; no registration token is persisted.
 
 ## Architecture
@@ -82,7 +120,7 @@ src/
   platform.ts       Hostname and OS detection
   protocol.ts       TypeScript types for the current Master API protocol
   master-client.ts  HTTP client for Master endpoints
-  daemon.ts         Main lifecycle and job claim loop
+  runner.ts         Main lifecycle and job claim loop
 ```
 
 ## Design Decisions
@@ -99,7 +137,7 @@ src/
 4. **Minimal dependencies** -- Only `toml` (parser) and `zod` (validation).
    Everything else (fetch, crypto, os, fs/promises, node:test) is built-in.
 5. **Registration token is never persisted** -- The `register` command uses
-   the registration token once and discards it. The daemon authenticates
+   the registration token once and discards it. The Worker authenticates
    solely via Ed25519 challenge-response using the worker identity.
 
 ## Testing

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Worker Next daemon: auth, runtime heartbeat, job claim, and task execution. */
+/** Worker Next runtime: auth, heartbeat, job claim, and task execution. */
 
 import { log } from "./logging.js";
 import { loadConfig, type WorkerNextConfig } from "./config.js";
@@ -22,12 +22,13 @@ const CLAIM_LIMIT = 1;
 const CLAIM_WAIT_SECONDS = 25;
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
-export interface DaemonOptions {
+export interface WorkerRunnerOptions {
   configPath?: string;
   identityPath?: string;
+  onReady?: () => void;
 }
 
-export class Daemon {
+export class WorkerRunner {
   private _abort = new AbortController();
   private _running = false;
   private _config!: WorkerNextConfig;
@@ -38,14 +39,14 @@ export class Daemon {
   private _unsubscribePluginSnapshots?: () => void;
   private _claimAbort: AbortController | null = null;
 
-  constructor(private readonly _opts: DaemonOptions) {}
+  constructor(private readonly _opts: WorkerRunnerOptions) {}
 
   async run(): Promise<void> {
     this._running = true;
 
     const onSignal = (): void => {
       if (!this._running) return;
-      log.info("daemon: signal received, shutting down...");
+      log.info("worker: signal received, shutting down...");
       this.stop();
     };
     process.on("SIGINT", onSignal);
@@ -54,6 +55,7 @@ export class Daemon {
     try {
       await this._init();
       if (this._running) {
+        this._opts.onReady?.();
         await this._mainLoop();
       }
     } finally {
@@ -62,7 +64,7 @@ export class Daemon {
       if (this._pluginManager) {
         await this._pluginManager.stopPlugins().catch(() => {});
       }
-      log.info("daemon: stopped");
+      log.info("worker: stopped");
       process.off("SIGINT", onSignal);
       process.off("SIGTERM", onSignal);
     }
@@ -89,7 +91,7 @@ export class Daemon {
       identityPath: this._opts.identityPath,
     });
     log.info(
-      "daemon: config loaded (master_url=%s, identity=%s)",
+      "worker: config loaded (master_url=%s, identity=%s)",
       this._config.master_url,
       this._config.identityPath,
     );
@@ -97,14 +99,14 @@ export class Daemon {
     this._identity = loadOrGenerateIdentity(this._config.identityPath);
 
     log.info(
-      "daemon: identity loaded (worker_id=%s, worker_name=%s)",
+      "worker: identity loaded (worker_id=%s, worker_name=%s)",
       this._identity.workerId || "<none>",
       this._identity.workerName || "<none>",
     );
 
     if (!this._identity.workerId) {
       throw new Error(
-        "daemon: no worker_id found in identity. " +
+        "worker: no worker_id found in identity. " +
         "Use 'capown-worker register <registration-link>' first.",
       );
     }
@@ -115,7 +117,7 @@ export class Daemon {
 
     const platform = getPlatformInfo();
     log.info(
-      "daemon: platform (hostname=%s, os=%s, arch=%s)",
+      "worker: platform (hostname=%s, os=%s, arch=%s)",
       platform.hostname,
       platform.os,
       platform.arch,
@@ -127,7 +129,7 @@ export class Daemon {
     await this._pluginManager.loadPlugins();
     await this._pluginManager.startPlugins();
     log.info(
-      "daemon: plugins loaded (%d plugins)",
+      "worker: plugins loaded (%d plugins)",
       this._pluginManager.getPluginSnapshots().length,
     );
 
@@ -152,7 +154,7 @@ export class Daemon {
         const ok = await this._authenticate();
         if (!ok) {
           log.error(
-            "daemon: authentication failed, will retry in %ds",
+            "worker: authentication failed, will retry in %ds",
             this._config.reconnect_interval,
           );
           await this._sleep(this._config.reconnect_interval * 1000);
@@ -164,7 +166,7 @@ export class Daemon {
       if (!(await this._client.reportRuntime(this._identity.workerId, pluginSnapshots))) {
         if (!this._client.sessionToken) continue;
         log.warn(
-          "daemon: runtime report failed, will retry in %ds",
+          "worker: runtime report failed, will retry in %ds",
           this._config.reconnect_interval,
         );
         await this._sleep(this._config.reconnect_interval * 1000);
@@ -173,7 +175,7 @@ export class Daemon {
 
       const stopHeartbeat = this._startHeartbeatLoop();
       try {
-        log.info("daemon: starting job claim loop...");
+        log.info("worker: starting job claim loop...");
         while (this._running && this._client.sessionToken) {
           this._claimAbort = new AbortController();
           const linked = this._linkAbort(this._claimAbort, this._abort.signal);
@@ -189,7 +191,7 @@ export class Daemon {
           if (!this._running) break;
           if (!response) {
             if (!this._client.sessionToken) break;
-            log.warn("daemon: job claim failed, will retry with backoff");
+            log.warn("worker: job claim failed, will retry with backoff");
             break;
           }
 
@@ -201,7 +203,7 @@ export class Daemon {
 
           for (const job of response.jobs) {
             this._handleJob(job).catch((err) => {
-              log.error("daemon: job handler error: %s", err);
+              log.error("worker: job handler error: %s", err);
             });
           }
         }
@@ -213,7 +215,7 @@ export class Daemon {
 
       if (this._running) {
         const delay = Math.min(backoff, BACKOFF_MAX_MS);
-        log.info("daemon: reconnecting in %dms...", delay);
+        log.info("worker: reconnecting in %dms...", delay);
         await this._sleep(delay);
         backoff = Math.min(
           Math.floor(backoff * (1.5 + Math.random() * BACKOFF_JITTER * 2 - BACKOFF_JITTER)),
@@ -244,7 +246,7 @@ export class Daemon {
             this._claimAbort?.abort();
             break;
           }
-          log.warn("daemon: heartbeat report failed; will retry");
+          log.warn("worker: heartbeat report failed; will retry");
         }
       }
     };
@@ -274,12 +276,12 @@ export class Daemon {
 
   private async _handleJob(job: WorkerJob): Promise<void> {
     if (!this._isValidJob(job)) {
-      log.error("daemon: claimed job missing required fields");
+      log.error("worker: claimed job missing required fields");
       return;
     }
 
     if (job.job_type === "cancel") {
-      log.info("daemon: cancel job for task %s", job.task_id);
+      log.info("worker: cancel job for task %s", job.task_id);
       const abort = this._activeTasks.get(job.task_id);
       if (abort) {
         abort.abort();
@@ -290,7 +292,7 @@ export class Daemon {
     if (job.job_type === "task") {
       if (job.task_type === "plugin_call") {
         if (this._activeTasks.has(job.task_id)) {
-          log.warn("daemon: duplicate delivery ignored for active task %s", job.task_id);
+          log.warn("worker: duplicate delivery ignored for active task %s", job.task_id);
           return;
         }
         const startedAt = new Date().toISOString();
@@ -363,7 +365,7 @@ export class Daemon {
         }
         return;
       }
-      log.warn("daemon: unknown task type %s", job.task_type);
+      log.warn("worker: unknown task type %s", job.task_type);
       const startedAt = new Date().toISOString();
       const accepted = await this._reportTaskResult(job.task_id, {
         task_id: job.task_id,
@@ -501,7 +503,7 @@ export class Daemon {
       const outcome = await this._client.reportTaskResultOutcome(taskId, report);
       if (outcome === "ok") return true;
       if (outcome === "rejected") {
-        log.error("daemon: master rejected result for task %s", taskId);
+        log.error("worker: master rejected result for task %s", taskId);
         return false;
       }
       attempt++;

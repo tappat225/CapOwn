@@ -3,9 +3,29 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseRegistrationLink } from "../src/cli.js";
+import { parseArgs, parseRegistrationLink } from "../src/cli.js";
 
 const TOKEN = "cown_register_" + "a".repeat(40);
+
+describe("parseArgs", () => {
+  it("uses start as the default command", () => {
+    assert.equal(parseArgs([]).command, "start");
+    assert.equal(parseArgs(["start"]).command, "start");
+  });
+
+  it("parses background lifecycle commands and foreground mode", () => {
+    assert.equal(parseArgs(["stop"]).command, "stop");
+    assert.equal(parseArgs(["status"]).command, "status");
+    assert.equal(parseArgs(["logs"]).command, "logs");
+    assert.equal(parseArgs(["logs", "--lines", "50"]).lines, 50);
+    assert.equal(parseArgs(["start", "--foreground"]).foreground, true);
+    assert.equal(parseArgs(["start", "-f"]).foreground, true);
+  });
+
+  it("does not interpret unknown commands as registration links", () => {
+    assert.equal(parseArgs(["unknown-command"]).command, "unknown-command");
+  });
+});
 
 describe("parseRegistrationLink", () => {
   it("parses a valid registration link", () => {
