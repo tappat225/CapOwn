@@ -136,7 +136,7 @@ func (s *Store) initDB() error {
 			mode TEXT DEFAULT 'container',
 			capabilities TEXT DEFAULT 'shell,file',
 			workspace TEXT DEFAULT '/workspace',
-			status TEXT DEFAULT 'online',
+			status TEXT DEFAULT 'offline',
 			last_heartbeat TEXT,
 			registered_at TEXT,
 			previous_worker_name TEXT,

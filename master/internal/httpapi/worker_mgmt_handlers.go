@@ -279,7 +279,7 @@ func (s *Server) handleDeleteWorker(w http.ResponseWriter, r *http.Request) {
 	// Clean up in-memory state
 	s.challenges.RevokeWorker(workerID)
 	s.workerSessions.RevokeWorker(workerID)
-	s.workerBroker.DrainAndClose(workerID)
+	s.taskStore.BlockWorker(workerID)
 
 	// Notify dashboard — ownerID is captured from before revoke
 	s.dashBus.PublishWorker(ownerID, "worker.revoked", map[string]string{

@@ -38,11 +38,6 @@ type WorkerJob struct {
 	TimeoutSecond int         `json:"timeout_seconds,omitempty"`
 }
 
-// WakeData is the optional SSE wake payload.
-type WakeData struct {
-	Reason string `json:"reason"`
-}
-
 // Store provides in-memory task storage with claim queues and result correlation.
 type Store struct {
 	mu             sync.Mutex
@@ -55,7 +50,6 @@ type Store struct {
 	cancelLeases   map[string]deliveryLease
 	deliveries     map[string]string
 	waiters        map[string][]chan struct{}
-	pollers        map[string]int
 	blockedWorkers map[string]bool
 	leaseDuration  time.Duration
 }
@@ -76,7 +70,6 @@ func newStoreWithLeaseDuration(leaseDuration time.Duration) *Store {
 		cancelLeases:   make(map[string]deliveryLease),
 		deliveries:     make(map[string]string),
 		waiters:        make(map[string][]chan struct{}),
-		pollers:        make(map[string]int),
 		blockedWorkers: make(map[string]bool),
 		leaseDuration:  leaseDuration,
 	}
@@ -424,31 +417,6 @@ func (ts *Store) RecoverWorker(workerID string) int {
 		ts.signalWaitersLocked(workerID)
 	}
 	return recovered
-}
-
-// RegisterPoller marks an active long-poll claim connection for online checks.
-func (ts *Store) RegisterPoller(workerID string) {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	ts.pollers[workerID]++
-}
-
-// UnregisterPoller clears one active long-poll claim connection.
-func (ts *Store) UnregisterPoller(workerID string) {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	if ts.pollers[workerID] <= 1 {
-		delete(ts.pollers, workerID)
-		return
-	}
-	ts.pollers[workerID]--
-}
-
-// HasPoller reports whether the worker currently has an active claim poll.
-func (ts *Store) HasPoller(workerID string) bool {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	return ts.pollers[workerID] > 0
 }
 
 // RegisterPending registers a result channel for a task (used by sync wait).

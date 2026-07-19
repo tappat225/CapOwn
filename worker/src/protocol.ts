@@ -15,7 +15,6 @@ export interface WorkerRegistrationRequest {
   capabilities: string[];
   workspace: string;
 }
-
 export interface WorkerRegistrationResponse {
   worker_id: string;
   worker_name: string;
@@ -183,13 +182,4 @@ export interface ApiErrorEnvelope {
     message: string;
     details: unknown;
   };
-}
-
-// --------------------------------------------------------------------------
-// SSE event
-// --------------------------------------------------------------------------
-
-export interface SSEEvent {
-  event: string;
-  data: Record<string, unknown>;
 }

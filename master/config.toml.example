@@ -37,7 +37,6 @@ log_level = "info"
 # In-memory store limits
 max_challenge_store_size = 1024
 max_session_store_size = 4096
-max_worker_event_queues = 1024
 max_dashboard_subscribers = 64
 
 # Password hashing concurrency limit

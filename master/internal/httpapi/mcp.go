@@ -527,7 +527,6 @@ func (s *Server) mcpPluginCall(ctx context.Context, authCtx *AuthContext, input 
 	}
 	pending := s.taskStore.RegisterPending(task.TaskID)
 	s.taskStore.EnqueuePending(task)
-	s.wakeWorker(worker.WorkerID)
 
 	waitFor := time.Duration(input.TimeoutSeconds) * time.Second
 	if waitFor > 60*time.Second {
@@ -608,7 +607,6 @@ func (s *Server) mcpCancelTask(authCtx *AuthContext, taskID string) (*domain.Tas
 	if !ok {
 		return s.taskStore.Get(taskID), nil
 	}
-	s.wakeWorker(task.TargetWorker)
 	return canceled, nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/capown/master/internal/auth"
 	"github.com/capown/master/internal/domain"
@@ -296,88 +295,4 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleWorkerEvents(w http.ResponseWriter, r *http.Request) {
-	workerID := r.PathValue("worker_id")
-
-	// Authenticate with worker session
-	ctx, apiErr := s.resolveWorkerSession(r, workerID)
-	if apiErr != nil {
-		writeError(w, apiErr)
-		return
-	}
-	if worker, err := s.store.GetActiveWorker(workerID); err != nil || worker == nil {
-		writeErrorCode(w, http.StatusNotFound, domain.ErrWorkerNotFound, "worker not found")
-		return
-	}
-
-	// Setup SSE
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeErrorCode(w, http.StatusInternalServerError, domain.ErrInternal, "streaming not supported")
-		return
-	}
-
-	ch, gen := s.workerBroker.Connect(workerID)
-	// Close the auth-to-connect race with administrative revocation. If the
-	// worker was revoked after authentication, remove this new broker entry.
-	if worker, err := s.store.GetActiveWorker(workerID); err != nil || worker == nil {
-		s.workerBroker.Disconnect(workerID, ch, gen)
-		writeErrorCode(w, http.StatusNotFound, domain.ErrWorkerNotFound, "worker not found")
-		return
-	}
-	defer func() {
-		// Only the current generation may transition the worker offline.
-		// A replaced or administratively closed stream must not overwrite
-		// the state of a newer connection. Job long-polls also count as online.
-		if s.workerBroker.Disconnect(workerID, ch, gen) && !s.taskStore.HasPoller(workerID) {
-			s.store.MarkOffline(workerID)
-			s.dashBus.PublishWorker(ctx.UserID, "worker.offline", map[string]string{
-				"worker_id": workerID,
-			})
-		}
-	}()
-
-	// Mark worker online on SSE connect — only updates status/heartbeat, preserves runtime metadata
-	s.store.SetOnline(workerID)
-	s.dashBus.PublishWorker(ctx.UserID, "worker.online", map[string]string{
-		"worker_id": workerID,
-	})
-
-	// Ping ticker every 30s
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-
-	// Channel to detect client disconnect
-	notify := r.Context().Done()
-
-	for {
-		select {
-		case <-notify:
-			return
-
-		case <-pingTicker.C:
-			// Send ping and heartbeat update
-			s.store.Heartbeat(workerID)
-			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
-
-		case evt, ok := <-ch:
-			if !ok {
-				return // channel closed
-			}
-			sseData, _ := json.Marshal(evt.Data)
-			if _, err := w.Write([]byte("event: " + evt.Event + "\ndata: " + string(sseData) + "\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
 }

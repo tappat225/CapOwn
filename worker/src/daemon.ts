@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Worker Next daemon: main loop -- auth, runtime report, job claim, optional SSE wake. */
+/** Worker Next daemon: auth, runtime heartbeat, job claim, and task execution. */
 
 import { log } from "./logging.js";
 import { loadConfig, type WorkerNextConfig } from "./config.js";
@@ -8,7 +8,6 @@ import {
   type IdentityData,
 } from "./identity.js";
 import { MasterClient } from "./master-client.js";
-import { SSEClient } from "./sse.js";
 import { getPlatformInfo } from "./platform.js";
 import { PluginManager } from "./plugins/manager.js";
 import { PluginError, PluginErrorCodes } from "./plugins/errors.js";
@@ -21,6 +20,7 @@ const BACKOFF_JITTER = 0.25;
 const STABLE_CLAIM_COUNT = 4;
 const CLAIM_LIMIT = 1;
 const CLAIM_WAIT_SECONDS = 25;
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 export interface DaemonOptions {
   configPath?: string;
@@ -37,7 +37,6 @@ export class Daemon {
   private _activeTasks = new Map<string, AbortController>();
   private _unsubscribePluginSnapshots?: () => void;
   private _claimAbort: AbortController | null = null;
-  private _wakePending = false;
 
   constructor(private readonly _opts: DaemonOptions) {}
 
@@ -172,19 +171,16 @@ export class Daemon {
         continue;
       }
 
-      // Optional SSE wake accelerator runs alongside the claim loop.
-      const stopWake = this._startWakeStream();
+      const stopHeartbeat = this._startHeartbeatLoop();
       try {
         log.info("daemon: starting job claim loop...");
         while (this._running && this._client.sessionToken) {
-          const waitSeconds = this._wakePending ? 0 : CLAIM_WAIT_SECONDS;
-          this._wakePending = false;
           this._claimAbort = new AbortController();
           const linked = this._linkAbort(this._claimAbort, this._abort.signal);
 
           const response = await this._client.claimJobs(this._identity.workerId, {
             limit: CLAIM_LIMIT,
-            waitSeconds,
+            waitSeconds: CLAIM_WAIT_SECONDS,
             signal: this._claimAbort.signal,
           });
           linked.dispose();
@@ -193,8 +189,6 @@ export class Daemon {
           if (!this._running) break;
           if (!response) {
             if (!this._client.sessionToken) break;
-            // Long-poll may be aborted by an SSE wake so the Worker can claim sooner.
-            if (this._wakePending) continue;
             log.warn("daemon: job claim failed, will retry with backoff");
             break;
           }
@@ -212,7 +206,7 @@ export class Daemon {
           }
         }
       } finally {
-        stopWake();
+        stopHeartbeat();
       }
 
       consecutiveClaims = 0;
@@ -229,62 +223,35 @@ export class Daemon {
     }
   }
 
-  private _startWakeStream(): () => void {
-    const wakeAbort = new AbortController();
-    const linked = this._linkAbort(wakeAbort, this._abort.signal);
-
+  private _startHeartbeatLoop(): () => void {
+    const heartbeatAbort = new AbortController();
+    const linked = this._linkAbort(heartbeatAbort, this._abort.signal);
     const run = async (): Promise<void> => {
-      let reconnectDelay = BACKOFF_BASE_MS;
+      while (this._running && this._client.sessionToken && !heartbeatAbort.signal.aborted) {
+        if (!(await this._sleepWithSignal(HEARTBEAT_INTERVAL_MS, heartbeatAbort.signal))) {
+          break;
+        }
+        if (!this._running || !this._client.sessionToken || heartbeatAbort.signal.aborted) {
+          break;
+        }
 
-      while (this._running && this._client.sessionToken && !wakeAbort.signal.aborted) {
-        let stable = false;
-        try {
-          const sseClient = new SSEClient({
-            masterUrl: this._config.master_url,
-            workerId: this._identity.workerId,
-            getSessionToken: () => this._client.sessionToken,
-            onSessionExpired: () => {
-              log.warn("daemon: SSE session expired, clearing session");
-              this._client.sessionToken = "";
-            },
-            onHeartbeat: () => {
-              stable = true;
-            },
-            onEvent: (event) => {
-              if (event === "wake") {
-                this._wakePending = true;
-              }
-            },
-            signal: wakeAbort.signal,
-          });
-          await sseClient.connect();
-        } catch (err) {
-          if (this._running && this._client.sessionToken && !wakeAbort.signal.aborted) {
-            log.warn("daemon: optional SSE wake stream closed: %s", err);
+        const ok = await this._client.reportRuntime(
+          this._identity.workerId,
+          this._pluginManager.getPluginSnapshots(),
+        );
+        if (!ok) {
+          if (!this._client.sessionToken) {
+            this._claimAbort?.abort();
+            break;
           }
-        }
-
-        if (!this._running || !this._client.sessionToken || wakeAbort.signal.aborted) {
-          break;
-        }
-
-        if (stable) {
-          reconnectDelay = BACKOFF_BASE_MS;
-        } else {
-          reconnectDelay = Math.min(
-            Math.floor(reconnectDelay * (1.5 + Math.random() * BACKOFF_JITTER * 2 - BACKOFF_JITTER)),
-            BACKOFF_MAX_MS,
-          );
-        }
-        if (!(await this._sleepWithSignal(reconnectDelay, wakeAbort.signal))) {
-          break;
+          log.warn("daemon: heartbeat report failed; will retry");
         }
       }
     };
 
     void run();
     return () => {
-      wakeAbort.abort();
+      heartbeatAbort.abort();
       linked.dispose();
     };
   }

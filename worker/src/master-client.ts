@@ -239,7 +239,7 @@ export class MasterClient {
   // Runtime metadata
   // ------------------------------------------------------------------
 
-  /** Report runtime metadata to the Master after reconnection.
+  /** Report runtime metadata and refresh the Worker's liveness heartbeat.
    *
    * Returns true on success. On 401/403, clears the session token
    * (caller should re-authenticate).

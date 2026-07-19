@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/capown/master/internal/auth"
-	"github.com/capown/master/internal/broker"
 	"github.com/capown/master/internal/config"
 	"github.com/capown/master/internal/domain"
 	"github.com/capown/master/internal/events"
@@ -23,7 +22,6 @@ type Server struct {
 	store          *store.Store
 	challenges     *auth.ChallengeStore
 	workerSessions *auth.SessionStore
-	workerBroker   *broker.WorkerBroker
 	dashBus        *events.DashboardBus
 	mux            *http.ServeMux
 	srv            *http.Server
@@ -48,7 +46,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		time.Duration(cfg.Master.SessionTTL)*time.Second,
 		cfg.Master.MaxSessionStoreSize,
 	)
-	wb := broker.NewWorkerBroker(cfg.Master.MaxWorkerEventQueues, 64)
 	db := events.NewDashboardBus(64, cfg.Master.MaxDashboardSubscribers)
 	ts := tasks.NewStore()
 
@@ -57,7 +54,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		store:          st,
 		challenges:     cs,
 		workerSessions: ss,
-		workerBroker:   wb,
 		dashBus:        db,
 		mux:            http.NewServeMux(),
 		pwHashSem:      make(chan struct{}, cfg.Master.PasswordHashConcurrency),
@@ -82,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 // Start begins the HTTP server and background jobs, blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	// Start background cleanup jobs
-	go service.RunWorkerSweeper(ctx, s.store, s.workerBroker, s.dashBus, s.taskStore, s.config.Master.HeartbeatTimeout)
+	go service.RunWorkerSweeper(ctx, s.store, s.dashBus, s.taskStore, s.config.Master.HeartbeatTimeout)
 	go service.RunChallengeCleaner(ctx, s.challenges, 60*time.Second)
 	go service.RunSessionCleaner(ctx, s.workerSessions, 60*time.Second)
 	go service.RunExpiredSessionCleaner(ctx, s.store, 5*time.Minute)
@@ -92,7 +88,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:         s.config.Master.Addr(),
 		Handler:      s.Handler(),
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 0, // 0 = no timeout — required for SSE long-lived connections
+		WriteTimeout: 0, // 0 = no timeout; dashboard SSE and worker long-polls are long-lived
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -152,7 +148,6 @@ func (s *Server) registerRoutes() {
 
 	// Worker management routes
 	s.mux.HandleFunc("PUT /v1/workers/{worker_id}/runtime", s.handleUpdateRuntime)
-	s.mux.HandleFunc("GET /v1/workers/{worker_id}/events", s.handleWorkerEvents)
 	s.mux.HandleFunc("GET /v1/workers/{worker_id}", s.handleGetWorker)
 	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}", s.handlePatchWorker)
 	s.mux.HandleFunc("DELETE /v1/workers/{worker_id}", s.handleDeleteWorker)
@@ -206,7 +201,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
 		Version:         "0.1.0",
-		ProtocolVersion: "1.7",
+		ProtocolVersion: "1.8",
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})

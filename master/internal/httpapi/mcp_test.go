@@ -188,8 +188,9 @@ func TestMCPPluginDispatchAndTaskLifecycle(t *testing.T) {
 	if err := srv.store.RegisterWorker(workerID, "worker-one", userID, "host", "public-key", "linux", "capability", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	srv.taskStore.RegisterPoller(workerID)
-	defer srv.taskStore.UnregisterPoller(workerID)
+	if _, _, err := srv.store.ReconnectWorker(workerID, "host", "linux", "capability", "", "", "[]"); err != nil {
+		t.Fatal(err)
+	}
 
 	workersResp := mcpTestRequest(t, srv, token, "tools/call", 1, map[string]interface{}{
 		"name":      "workers_list",

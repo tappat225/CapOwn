@@ -367,24 +367,3 @@ func TestBlockWorkerInterruptsClaimAndCanBeReenabled(t *testing.T) {
 		t.Fatal("worker should be unblocked")
 	}
 }
-
-func TestPollerRegistration(t *testing.T) {
-	store := NewStore()
-	workerID := "wrk_0123456789abcdef01234567"
-	if store.HasPoller(workerID) {
-		t.Fatal("unexpected poller")
-	}
-	store.RegisterPoller(workerID)
-	store.RegisterPoller(workerID)
-	if !store.HasPoller(workerID) {
-		t.Fatal("expected poller after register")
-	}
-	store.UnregisterPoller(workerID)
-	if !store.HasPoller(workerID) {
-		t.Fatal("expected poller after one unregister")
-	}
-	store.UnregisterPoller(workerID)
-	if store.HasPoller(workerID) {
-		t.Fatal("poller should be gone")
-	}
-}

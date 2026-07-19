@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 1.7.0
+  version: 1.8.0
   description: |
-    Language-independent v1.7 wire contract for the CapOwn control plane.
+    Language-independent v1.8 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
     via the `plugin_call` task type. It also defines the authenticated
     next-only MCP Streamable HTTP interface at `/mcp`. Workers claim jobs via
-    long-poll; SSE is an optional wake accelerator.
+    long-poll and report runtime heartbeats separately. Dashboard events use SSE.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "1.7"
+  x-capown-protocol-version: "1.8"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -637,7 +637,12 @@ paths:
   /v1/workers/{worker_id}/runtime:
     put:
       tags: [workers]
-      summary: Report Worker runtime metadata
+      summary: Report Worker runtime metadata and heartbeat
+      description: |
+        Update the Worker's runtime snapshot and refresh its liveness
+        heartbeat. Workers MUST send this request periodically while they are
+        running. The Master marks a Worker offline after the configured
+        heartbeat timeout elapses without a successful request.
       operationId: updateWorkerRuntime
       security:
         - bearerAuth: []
@@ -737,38 +742,6 @@ paths:
         "404":
           $ref: '#/components/responses/NotFound'
 
-  /v1/workers/{worker_id}/events:
-    get:
-      tags: [events, workers]
-      summary: Open the optional Worker wake SSE stream
-      description: |
-        This stream is authenticated with a Worker session and is consumed by
-        the Worker. It is an optional accelerator only: the Master may emit
-        `wake` events when jobs are available so the Worker can claim sooner.
-        Task payloads are never delivered on this stream. Correctness depends
-        on `POST /v1/workers/{worker_id}/jobs/claim`, not on SSE connectivity.
-        Heartbeat comments (`: ping`) are sent at regular intervals.
-      operationId: workerEventStream
-      security:
-        - bearerAuth: []
-      x-capown-auth-token-types: [worker]
-      parameters:
-        - $ref: '#/components/parameters/WorkerId'
-      responses:
-        "200":
-          description: SSE stream.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: SSE wire stream. See components.schemas.SSEEnvelope.
-        "401":
-          $ref: '#/components/responses/Unauthorized'
-        "403":
-          $ref: '#/components/responses/Forbidden'
-        "404":
-          $ref: '#/components/responses/WorkerNotFound'
-
   /v1/workers/{worker_id}/jobs/claim:
     post:
       tags: [tasks, workers]
@@ -791,11 +764,10 @@ paths:
 
         A returned `cancel` job is also leased and may be delivered again until
         the Worker reports a terminal task result. Workers MUST therefore treat
-        task and cancel delivery as idempotent. The optional SSE `wake` event
-        MUST NOT cancel an active claim request.
+        task and cancel delivery as idempotent.
 
-        A Worker is considered online for dispatch while it has an open SSE
-        stream or an active long-poll claim request.
+        A Worker is considered online for dispatch while its runtime heartbeat
+        is fresh according to the Master's configured heartbeat timeout.
       operationId: claimWorkerJobs
       security:
         - bearerAuth: []
@@ -892,10 +864,9 @@ paths:
         timeout is reached. Without `?wait`, the task is accepted as
         `pending` and processed asynchronously.
 
-        The target Worker must be online (open SSE stream or active job
-        long-poll). Offline dispatch is rejected with `worker_offline`.
-        If the Worker has an open SSE stream, the Master may send a best-effort
-        `wake` event; wake delivery failure does not fail the dispatch.
+        The target Worker must be online according to its runtime heartbeat.
+        Offline dispatch is rejected with `worker_offline`. The Worker claims
+        the queued task through the long-poll endpoint.
       operationId: dispatchTask
       security:
         - bearerAuth: []
@@ -1024,7 +995,7 @@ paths:
         - Terminal tasks return the current task unchanged (idempotent).
 
         Enqueuing a cancel job for a running task requires the Worker to be
-        online. The Master may send a best-effort SSE `wake` event.
+        online. The Worker receives the cancel job through the next claim.
       operationId: cancelTask
       security:
         - bearerAuth: []
@@ -2108,21 +2079,10 @@ components:
         event:
           type: string
           description: |
-            SSE event field. Worker streams may emit `wake` when jobs are
-            available. Dashboard streams use events defined in
+            Dashboard SSE event field. Dashboard streams use events defined in
             DashboardSSEEnvelope.
         data:
           description: JSON value carried in the SSE data field.
-
-    WorkerWakeData:
-      type: object
-      additionalProperties: false
-      required: [reason]
-      properties:
-        reason:
-          type: string
-          enum: [jobs_available]
-          description: Why the Worker should claim jobs now.
 
     JobType:
       type: string

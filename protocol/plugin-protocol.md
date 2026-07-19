@@ -256,10 +256,9 @@ Claiming a `task` job creates a short delivery lease. The task remains
 `pending` until the Worker reports `status: running` with the claimed
 `delivery_id`; the Worker MUST send that confirmation before invoking the
 plugin and reuse that identifier for later results. If confirmation is not received,
-the Master makes the task claimable again. Optional SSE `wake` events never
-cancel an active claim request.
-Optional Worker SSE may emit a `wake` event when jobs are available; Workers
-MUST treat claim as the source of truth and MUST NOT rely on SSE for delivery.
+the Master makes the task claimable again. Worker liveness is reported
+independently through the runtime heartbeat. Workers MUST treat claim as the
+source of truth for all task and cancel delivery.
 
 The Worker MUST reject:
 

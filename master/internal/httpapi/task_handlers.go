@@ -213,19 +213,21 @@ func (s *Server) handleSetWorkerPluginEnabled(w http.ResponseWriter, r *http.Req
 		OwnerUserID:   ctx.UserID,
 	}
 	s.taskStore.EnqueuePending(task)
-	s.wakeWorker(workerID)
 	task = s.taskStore.Get(task.TaskID)
 	w.Header().Set("Location", "/v1/tasks/"+task.TaskID)
 	writeJSON(w, http.StatusAccepted, toTaskResponse(task))
 }
 
 func (s *Server) isWorkerOnline(workerID string) bool {
-	return s.workerBroker.IsConnected(workerID) || s.taskStore.HasPoller(workerID)
-}
-
-func (s *Server) wakeWorker(workerID string) {
-	// Best-effort only: delivery correctness depends on job claim, not SSE.
-	_ = s.workerBroker.Push(workerID, "wake", &tasks.WakeData{Reason: "jobs_available"})
+	worker, err := s.store.GetActiveWorker(workerID)
+	if err != nil || worker == nil || worker.Status != string(domain.WorkerOnline) || !worker.LastHeartbeat.Valid {
+		return false
+	}
+	lastHeartbeat, err := time.Parse(time.RFC3339, worker.LastHeartbeat.String)
+	if err != nil {
+		return false
+	}
+	return time.Since(lastHeartbeat) <= time.Duration(s.config.Master.HeartbeatTimeout)*time.Second
 }
 
 func (s *Server) handleClaimJobs(w http.ResponseWriter, r *http.Request) {
@@ -271,22 +273,9 @@ func (s *Server) handleClaimJobs(w http.ResponseWriter, r *http.Request) {
 		waitSeconds = parsed
 	}
 
-	s.taskStore.RegisterPoller(workerID)
-	defer func() {
-		s.taskStore.UnregisterPoller(workerID)
-		if !s.isWorkerOnline(workerID) {
-			s.store.MarkOffline(workerID)
-		}
-	}()
-	s.store.SetOnline(workerID)
-	s.store.Heartbeat(workerID)
-
 	jobs := s.taskStore.ClaimOrWait(r.Context(), workerID, limit, time.Duration(waitSeconds)*time.Second)
 	if jobs == nil {
 		jobs = []tasks.WorkerJob{}
-	}
-	if len(jobs) > 0 {
-		s.store.Heartbeat(workerID)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": jobs})
 }
@@ -383,7 +372,6 @@ func (s *Server) handleDispatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.taskStore.EnqueuePending(task)
-	s.wakeWorker(req.TargetWorker)
 
 	if doWait {
 		timeoutDuration := time.Duration(timeout) * time.Second
@@ -615,6 +603,5 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, toTaskResponse(task))
 		return
 	}
-	s.wakeWorker(task.TargetWorker)
 	writeJSON(w, http.StatusOK, toTaskResponse(canceledTask))
 }

@@ -82,7 +82,7 @@ func (s *Store) RegisterWorkerAtomic(
 	now := NowISO()
 	_, err = tx.Exec(
 		`INSERT INTO workers (worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, registered_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?)`,
 		workerID, workerName, ownerID, publicKey, hostname, osName, mode, capabilities, workspace, now,
 	)
 	if err != nil {

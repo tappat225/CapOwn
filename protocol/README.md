@@ -36,7 +36,7 @@ The current `/v1` contract covers:
 - Worker registration;
 - Worker Ed25519 challenge-response authentication;
 - Worker runtime metadata and liveness;
-- optional Worker wake SSE and dashboard SSE events;
+- Worker runtime heartbeats and dashboard SSE events;
 - Worker job claiming with `POST /v1/workers/{worker_id}/jobs/claim`;
 - plugin discovery, task dispatch, task results, and task cancellation;
 - `plugin_call` execution through MCP-over-stdio plugins; and
@@ -48,13 +48,12 @@ surface; it does not provide the legacy shell, file, or container tools.
 
 Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
 
-- Worker SSE is optional and may only send `wake` events;
 - claimed task jobs remain `pending` until the Worker reports `running` with
   the current `delivery_id` before execution;
 - interrupted, unconfirmed deliveries are made claimable again after a short
   internal lease; and
 - Cancel requests for running tasks are claimed as `cancel` jobs.
-- Task payloads are no longer pushed over SSE.
+- Worker liveness is reported separately through the runtime heartbeat.
 
 ## Versioning policy
 
@@ -83,8 +82,8 @@ Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
   otherwise.
 - The configured Master URL is an origin only, for example
   `https://master.example.com:9210`; clients append the protocol path.
-- SSE uses `text/event-stream`. A comment line such as `: ping` is a heartbeat
-  and is not an application event.
+- Dashboard SSE uses `text/event-stream`. A comment line such as `: ping` is a
+  heartbeat and is not an application event.
 
 ## Change process
 

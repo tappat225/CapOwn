@@ -328,10 +328,17 @@ func TestRenameAndRevokeWorkerAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	worker, err := s.GetActiveWorker(workerID)
+	if err != nil || worker == nil || worker.Status != "offline" || worker.LastHeartbeat.Valid {
+		t.Fatalf("new Worker should be offline before runtime heartbeat: %#v, %v", worker, err)
+	}
+	if _, becameOnline, err := s.ReconnectWorker(workerID, "host", "linux", "capability", "", "", "[]"); err != nil || !becameOnline {
+		t.Fatalf("runtime heartbeat should bring Worker online: became_online=%v err=%v", becameOnline, err)
+	}
 	if err := s.RenameWorkerAtomic(workerID, user.UserID, "worker.two"); err != nil {
 		t.Fatal(err)
 	}
-	worker, err := s.GetActiveWorker(workerID)
+	worker, err = s.GetActiveWorker(workerID)
 	if err != nil || worker == nil {
 		t.Fatalf("get renamed worker: %v", err)
 	}

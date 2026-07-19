@@ -29,7 +29,6 @@ func (s *Server) disconnectUserWorkers(userID string, revoke bool) error {
 	}
 	for _, worker := range workers {
 		s.taskStore.BlockWorker(worker.WorkerID)
-		s.workerBroker.DrainAndClose(worker.WorkerID)
 		s.store.MarkOffline(worker.WorkerID)
 		if revoke {
 			if err := s.store.RevokeWorkerAtomic(worker.WorkerID, userID); err != nil {

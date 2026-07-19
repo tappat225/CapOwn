@@ -14,7 +14,6 @@ implement that specification.
 [Worker (TypeScript)] -- Ed25519 -+         |
                                             |--- ChallengeStore (in-memory)
                                             |--- SessionStore  (in-memory)
-                                            |--- WorkerBroker  (optional wake SSE)
                                             |--- TaskStore     (job claim queues)
                                             |--- DashboardBus  (user events)
 ```
@@ -180,7 +179,6 @@ POST /v1/workers                           -- register (with cown_register_* tok
 POST /v1/workers/auth/challenges           -- request Ed25519 nonce
 POST /v1/workers/auth/sessions             -- verify signed nonce
 PUT  /v1/workers/{id}/runtime              -- report runtime metadata
-GET  /v1/workers/{id}/events               -- SSE stream
 POST /v1/workers/{id}/jobs/claim            -- long-poll and claim jobs
 ```
 
@@ -268,9 +266,10 @@ configuration and database state survive container recreation.
 - **Claim-based jobs**: Workers claim tasks and cancellation jobs through a
   long-poll endpoint; short delivery leases requeue interrupted claims, and a
   task becomes running only after Worker confirmation with the current opaque
-  delivery ID. Task payloads are never delivered by SSE.
-- **Optional wake SSE**: The Worker SSE channel only carries best-effort wake
-  events and heartbeats.
+  delivery ID. Task payloads are delivered only through the claim endpoint.
+- **Runtime heartbeats**: Workers periodically report runtime metadata to keep
+  their liveness lease fresh. Stale Workers are marked offline and their
+  unfinished tasks are recovered.
 - **Ed25519 via crypto/ed25519**: Pure Go implementation matching Node.js `crypto.sign()`
 - **PBKDF2-HMAC-SHA256**: 600,000 iterations, hex salt -- Python-compatible password hashing
 - **Registration links**: When `CAPOWN_MASTER_PUBLIC_URL` is configured, the Master returns full registration URLs for the Worker CLI

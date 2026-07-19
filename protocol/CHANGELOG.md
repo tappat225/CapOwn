@@ -2,6 +2,17 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+## 1.8.0 - 2026-07-19
+
+Removed the Worker-specific SSE transport:
+
+- Removed `GET /v1/workers/{worker_id}/events` and Worker `wake` events.
+- Worker task and cancellation delivery use the long-poll claim endpoint only.
+- Worker liveness is maintained by periodic authenticated runtime heartbeats.
+- Worker online dispatch checks use fresh runtime heartbeats, and stale workers
+  are recovered without depending on an active claim request.
+- Dashboard `/v1/events` SSE remains available for UI event delivery.
+
 ## 1.7.0 - 2026-07-19
 
 Added the authenticated next-only MCP Streamable HTTP interface:
