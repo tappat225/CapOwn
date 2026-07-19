@@ -12,8 +12,8 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 $Prefix = Join-Path $HOME ".capown"
-$WorkerSrc = Join-Path $PSScriptRoot ".." "worker"
-$AppDir = Join-Path $Prefix "worker" "app"
+$WorkerSrc = Join-Path $PSScriptRoot "..\worker"
+$AppDir = Join-Path $Prefix "worker\app"
 $BinDir = Join-Path $Prefix "bin"
 $ConfigDir = Join-Path $Prefix "worker"
 $ConfigFile = Join-Path $ConfigDir "config.toml"
@@ -24,7 +24,7 @@ $Launcher = Join-Path $BinDir "capown-worker.cmd"
 if ($args -contains "--prefix") {
     $idx = [array]::IndexOf($args, "--prefix")
     $Prefix = $args[$idx + 1]
-    $AppDir = Join-Path $Prefix "worker" "app"
+    $AppDir = Join-Path $Prefix "worker\app"
     $BinDir = Join-Path $Prefix "bin"
     $ConfigDir = Join-Path $Prefix "worker"
     $ConfigFile = Join-Path $ConfigDir "config.toml"

@@ -15,9 +15,8 @@ Top-level responsibilities:
 
 - `master/` - Go Master HTTP API, SQLite persistence, authentication, Worker
   sessions, and SSE broker.
-- `worker/` - TypeScript/Node Worker. The current milestone covers registration,
-  Ed25519 authentication, runtime reporting, claim-based job execution, and
-  optional SSE wake reconnect.
+- `worker/` - TypeScript/Node Worker. The current milestone is connectivity-only:
+  registration, Ed25519 authentication, runtime reporting, and SSE reconnect.
 - `protocol/` - language-independent protocol contract. OpenAPI is the
   canonical wire definition.
 
@@ -70,20 +69,17 @@ implementation-specific type file.
 - Update the protocol document before changing an observable wire behavior.
 - Keep `worker/src/protocol.ts` aligned with the OpenAPI schemas. It is an
   implementation view, not an independent protocol definition.
-- Use `/v1` as the sole protocol prefix during this pre-user development stage
-  and record the current contract in SemVer. Breaking changes are allowed when
-  Master, Worker, and protocol definitions are updated together; do not add
-  compatibility shims or parallel protocol versions.
-- Current request handlers reject unknown JSON fields, so clients must send
-  only fields declared by the endpoint. Response and SSE schemas are likewise
-  defined by the current `/v1` contract.
+- Use `/v1` for the current major protocol version and SemVer in the protocol
+  document. Breaking wire changes require a new major URL prefix.
+- Compatible response additions are allowed only when existing consumers can
+  ignore them. Current request handlers reject unknown JSON fields, so clients
+  must send only fields declared by the endpoint.
 - Use UTF-8 JSON with `snake_case` fields, UTC RFC 3339 timestamps, `[]` for
   empty collections, and `Authorization: Bearer <token>` for authenticated
   requests.
-- Keep any new task, history, file/shell, or plugin behavior out of the
-  protocol until its Master-to-Worker contract is specified first. The current
-  v1 contract already includes plugin task dispatch, results, cancellation,
-  claim-based job delivery, and optional SSE wake events.
+- Keep task dispatch, task results, cancellation, history, file/shell
+  execution, and plugins out of the current v1 connectivity milestone until
+  their Master-to-Worker protocol is specified first.
 
 ## Must
 
@@ -109,8 +105,8 @@ Ask for confirmation before:
 
 - changing public routes, JSON fields, status codes, error codes, token formats,
   authentication rules, or SSE event semantics;
-- changing the current `/v1` contract without updating `protocol/openapi.yaml`
-  first;
+- changing the `/v1` protocol boundary or adding a new protocol major version;
+- adding task execution or plugin behavior to the connectivity-only milestone;
 - changing config locations, environment variable names, deployment behavior,
   or token storage/handling;
 - adding a runtime dependency to Master or Worker;
@@ -130,8 +126,8 @@ Ask for confirmation before:
 - Never copy the legacy deployment tree into this repository without checking
   its assumptions about routes, config paths, runtime dependencies, and
   licensing.
-- Never treat a connected SSE stream as proof that task delivery succeeded;
-  Workers claim jobs via long-poll. SSE may only send optional `wake` events.
+- Never treat a connected SSE stream as proof that task execution is supported;
+  current Worker event handling intentionally has no task implementation.
 - Never commit generated build output, local databases, real config files, or
   dependency directories such as `node_modules/`.
 
@@ -141,8 +137,8 @@ Ask for confirmation before:
 
 - Go 1.23 module under `master/`.
 - Uses Go `net/http` routing, SQLite, Ed25519 verification, PBKDF2 password
-  hashing, in-memory Worker challenge/session stores, a Worker SSE broker for
-  optional wake events, in-memory job claim queues, and a dashboard event bus.
+  hashing, in-memory Worker challenge/session stores, a Worker SSE broker, and a
+  dashboard event bus.
 - Web sessions use `cown_web_*`; Worker sessions use `cown_sess_*`; Worker
   registration tokens use `cown_register_*`. Client/admin API tokens are opaque
   bearer tokens managed by the Master.
@@ -159,8 +155,8 @@ Ask for confirmation before:
   UTF-8 bytes of the challenge nonce.
 - Persists the existing identity format and reconnects after transient Master
   or SSE failures.
-- Reports `mode: "capability"` and an explicit `capabilities: []`; plugin
-  execution is driven by the current claim-based task protocol.
+- Reports `mode: "capability"` and an explicit `capabilities: []` in the current
+  milestone. Do not advertise execution capabilities that are not implemented.
 
 ### Client migration boundary
 

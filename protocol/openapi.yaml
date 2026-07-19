@@ -1,18 +1,19 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 1.6.0
+  version: 1.7.0
   description: |
-    Language-independent v1.6 wire contract for the CapOwn control plane.
+    Language-independent v1.7 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
-    via the `plugin_call` task type. Workers claim jobs via long-poll;
-    SSE is an optional wake accelerator.
+    via the `plugin_call` task type. It also defines the authenticated
+    next-only MCP Streamable HTTP interface at `/mcp`. Workers claim jobs via
+    long-poll; SSE is an optional wake accelerator.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "1.6"
+  x-capown-protocol-version: "1.7"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -44,6 +45,7 @@ tags:
   - name: tasks
   - name: events
   - name: admin
+  - name: mcp
 
 paths:
   /healthz:
@@ -73,6 +75,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+
+  /mcp:
+    post:
+      tags: [mcp]
+      summary: MCP Streamable HTTP endpoint
+      description: |
+        Stateless JSON MCP endpoint for next Master tools. Every request
+        requires a bearer token whose token type is `client`. Clients MUST
+        advertise both `application/json` and `text/event-stream` in the
+        `Accept` header. The current implementation returns JSON responses and
+        does not create an MCP session.
+      operationId: mcp
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [client]
+      parameters:
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+          example: application/json, text/event-stream
+          description: Required MCP response media types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPJSONRPCRequest'
+      responses:
+        "200":
+          description: JSON-RPC response for a request with an id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPJSONRPCResponse'
+        "202":
+          description: JSON-RPC notification accepted without a response body.
+        "400":
+          description: Malformed JSON-RPC request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPJSONRPCResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "406":
+          description: The Accept header does not advertise both MCP media types.
+        "415":
+          description: The request Content-Type is not application/json.
 
   /v1/meta:
     get:
@@ -1436,11 +1490,57 @@ components:
     HealthResponse:
       type: object
       additionalProperties: false
-      required: [status]
+      required: [status, mcp_enabled]
       properties:
         status:
           type: string
           const: ok
+        mcp_enabled:
+          type: boolean
+          const: true
+
+    MCPJSONRPCRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          type: [string, number, 'null']
+        method:
+          type: string
+          enum: [initialize, ping, tools/list, tools/call, notifications/initialized, notifications/cancelled]
+        params:
+          type: object
+
+    MCPJSONRPCResponse:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          type: [string, number, 'null']
+        result:
+          description: JSON-RPC result for the requested MCP method.
+        error:
+          $ref: '#/components/schemas/MCPJSONRPCError'
+
+    MCPJSONRPCError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          description: Optional structured error data.
 
     MetaResponse:
       type: object
@@ -1454,7 +1554,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "1.6"
+          const: "1.7"
         initialized:
           type: boolean
         capabilities:

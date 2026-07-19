@@ -5,3 +5,7 @@ worker/node_modules/
 worker/dist/
 __pycache__/
 *.py[cod]
+
+.codex/
+.claude/
+.agents/

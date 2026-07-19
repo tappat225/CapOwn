@@ -2,6 +2,17 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+## 1.7.0 - 2026-07-19
+
+Added the authenticated next-only MCP Streamable HTTP interface:
+
+- New stateless `POST /mcp` endpoint for MCP hosts.
+- Client bearer tokens are required for initialization, tool discovery, and
+  tool calls; web, admin, Worker session, and registration tokens are rejected.
+- Added Worker, plugin, and task tools backed by the current `plugin_call`
+  task protocol.
+- Added `mcp_enabled: true` to health responses.
+
 ## 1.6.0 — 2026-07-19
 
 Added administrator-issued invitations for normal user registration:

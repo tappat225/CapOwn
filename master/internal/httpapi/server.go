@@ -125,6 +125,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("POST /mcp", s.handleMCP)
+	s.mux.HandleFunc("GET /mcp", s.handleMCPMethodNotAllowed)
 
 	// Auth routes
 	s.mux.HandleFunc("POST /v1/auth/register", s.handleRegister)
@@ -204,14 +206,17 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
 		Version:         "0.1.0",
-		ProtocolVersion: "1.6",
+		ProtocolVersion: "1.7",
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "ok",
+		"mcp_enabled": true,
+	})
 }
 
 // acquirePWHash acquires the password hashing semaphore.
