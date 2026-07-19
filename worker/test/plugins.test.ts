@@ -6,7 +6,10 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateManifest } from "../src/plugins/manifest.js";
-import { McpStdioAdapter } from "../src/plugins/mcp-stdio.js";
+import {
+  McpStdioAdapter,
+  mcpStdioSpawnOptions,
+} from "../src/plugins/mcp-stdio.js";
 import { PluginManager } from "../src/plugins/manager.js";
 import { PluginErrorCodes } from "../src/plugins/errors.js";
 import type { PluginManifest } from "../src/plugins/types.js";
@@ -35,6 +38,16 @@ function baseManifest(
 }
 
 describe("plugin manifests", () => {
+  it("starts stdio plugins without a visible Windows console", () => {
+    const env = { PATH: process.env["PATH"] };
+    assert.deepEqual(mcpStdioSpawnOptions(env), {
+      stdio: ["pipe", "pipe", "pipe"],
+      env,
+      shell: false,
+      windowsHide: true,
+    });
+  });
+
   it("provisions the bundled filesystem plugin on first load", async () => {
     const configDir = await mkdtemp(join(tmpdir(), "capown-default-plugin-"));
     try {
@@ -63,6 +76,7 @@ describe("plugin manifests", () => {
       assert.equal(snapshot?.status, "running");
       assert.ok(snapshot?.tools.some((tool) => tool.name === "read_file"));
       assert.ok(snapshot?.tools.some((tool) => tool.name === "write_file"));
+      assert.deepEqual(manager.capabilities, ["plugin.invoke"]);
       const invocation = await manager.invokePlugin(
         "filesystem",
         "list_allowed_directories",

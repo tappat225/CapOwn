@@ -136,7 +136,13 @@ export class WorkerRunner {
     this._unsubscribePluginSnapshots = this._pluginManager.onSnapshotsChanged(() => {
       if (!this._abort.signal.aborted && this._client.sessionToken && this._identity.workerId) {
         const snapshots = this._pluginManager.getPluginSnapshots();
-        this._client.reportRuntime(this._identity.workerId, snapshots).catch(() => {});
+        this._client
+          .reportRuntime(
+            this._identity.workerId,
+            snapshots,
+            this._pluginManager.capabilities,
+          )
+          .catch(() => {});
       }
     });
   }
@@ -163,7 +169,13 @@ export class WorkerRunner {
       }
 
       const pluginSnapshots = this._pluginManager.getPluginSnapshots();
-      if (!(await this._client.reportRuntime(this._identity.workerId, pluginSnapshots))) {
+      if (
+        !(await this._client.reportRuntime(
+          this._identity.workerId,
+          pluginSnapshots,
+          this._pluginManager.capabilities,
+        ))
+      ) {
         if (!this._client.sessionToken) continue;
         log.warn(
           "worker: runtime report failed, will retry in %ds",
@@ -240,6 +252,7 @@ export class WorkerRunner {
         const ok = await this._client.reportRuntime(
           this._identity.workerId,
           this._pluginManager.getPluginSnapshots(),
+          this._pluginManager.capabilities,
         );
         if (!ok) {
           if (!this._client.sessionToken) {
@@ -338,7 +351,11 @@ export class WorkerRunner {
             throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin state parameters are invalid");
           }
           const plugin = await this._pluginManager.setPluginEnabled(params.plugin_id, params.enabled);
-          await this._client.reportRuntime(this._identity.workerId, this._pluginManager.getPluginSnapshots());
+          await this._client.reportRuntime(
+            this._identity.workerId,
+            this._pluginManager.getPluginSnapshots(),
+            this._pluginManager.capabilities,
+          );
           await this._reportTaskResult(job.task_id, {
             task_id: job.task_id,
             delivery_id: job.delivery_id,

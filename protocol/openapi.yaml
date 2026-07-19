@@ -1525,7 +1525,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "1.7"
+          const: "1.8"
         initialized:
           type: boolean
         capabilities:

@@ -23,6 +23,8 @@ import {
   waitForWorkerStatus,
   workerLogPath,
   readWorkerLogTail,
+  readWorkerLogTailSnapshot,
+  followWorkerLog,
   type RuntimeControl,
   type WorkerProcessMode,
 } from "./service.js";
@@ -38,6 +40,7 @@ export interface CliArgs {
   foreground?: boolean;
   backgroundChild?: boolean;
   lines?: number;
+  follow?: boolean;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -54,6 +57,8 @@ export function parseArgs(argv: string[]): CliArgs {
       args.name = argv[++i];
     } else if (a === "--lines" && i + 1 < argv.length) {
       args.lines = Number(argv[++i]);
+    } else if (a === "--no-follow") {
+      args.follow = false;
     } else if (a === "--foreground" || a === "-f") {
       args.foreground = true;
     } else if (a === "--background-child") {
@@ -97,7 +102,7 @@ function printHelp(): void {
     "  start --foreground               Run the Worker in the current terminal",
     "  status                           Show registration and process status",
     "  stop                             Stop the running Worker",
-    "  logs [--lines <count>]            Show recent Worker logs (default: 200)",
+    "  logs [--lines <count>]            Follow Worker logs (default: last 200 lines)",
     "  config show                      Display current configuration",
     "  help                             Show this help message",
     "  version                          Show version",
@@ -107,6 +112,7 @@ function printHelp(): void {
     "  --identity <path> Path to identity TOML file",
     "  --name <name>    Worker name (for register command)",
     "  --lines <count>  Number of log lines to show",
+    "  --no-follow      Show recent logs and exit",
     "  -f, --foreground Run start in the current terminal",
     "  -h, --help       Show this help message",
     "  -V, --version    Show version",
@@ -455,7 +461,7 @@ async function handleStop(args: CliArgs): Promise<number> {
   return 0;
 }
 
-function handleLogs(args: CliArgs): number {
+async function handleLogs(args: CliArgs): Promise<number> {
   let config: WorkerNextConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
@@ -471,13 +477,42 @@ function handleLogs(args: CliArgs): number {
   }
 
   const logPath = workerLogPath(config.configPath);
-  if (!fs.existsSync(logPath)) {
-    process.stdout.write(`No Worker log found at ${logPath}\n`);
-    return 0;
-  }
-
   try {
-    process.stdout.write(readWorkerLogTail(logPath, lineCount));
+    if (args.follow === false) {
+      if (!fs.existsSync(logPath)) {
+        process.stdout.write(`No Worker log found at ${logPath}\n`);
+        return 0;
+      }
+      process.stdout.write(readWorkerLogTail(logPath, lineCount));
+      return 0;
+    }
+
+    let startPosition = 0;
+    if (fs.existsSync(logPath)) {
+      const snapshot = readWorkerLogTailSnapshot(logPath, lineCount);
+      process.stdout.write(snapshot.text);
+      startPosition = snapshot.position;
+    } else {
+      process.stderr.write(`Waiting for Worker log at ${logPath}...\n`);
+    }
+
+    const controller = new AbortController();
+    const stopFollowing = (): void => controller.abort();
+    process.once("SIGINT", stopFollowing);
+    process.once("SIGTERM", stopFollowing);
+    try {
+      await followWorkerLog({
+        logPath,
+        startPosition,
+        signal: controller.signal,
+        onData: (chunk) => {
+          process.stdout.write(chunk);
+        },
+      });
+    } finally {
+      process.off("SIGINT", stopFollowing);
+      process.off("SIGTERM", stopFollowing);
+    }
     return 0;
   } catch (error) {
     process.stderr.write("error: failed to read Worker log: " + String(error) + "\n");
@@ -529,7 +564,7 @@ export async function main(argv: string[]): Promise<number> {
       return await handleStop(args);
     }
     case "logs": {
-      return handleLogs(args);
+      return await handleLogs(args);
     }
     case "config": {
       if (args.link === "show") {

@@ -393,7 +393,15 @@ export function workerLogPath(configPath: string): string {
   return runtimePaths(configPath).logPath;
 }
 
-export function readWorkerLogTail(logPath: string, lineCount: number): string {
+export interface WorkerLogSnapshot {
+  text: string;
+  position: number;
+}
+
+export function readWorkerLogTailSnapshot(
+  logPath: string,
+  lineCount: number,
+): WorkerLogSnapshot {
   if (!Number.isInteger(lineCount) || lineCount <= 0) {
     throw new Error("line count must be a positive integer");
   }
@@ -401,7 +409,7 @@ export function readWorkerLogTail(logPath: string, lineCount: number): string {
   const descriptor = fs.openSync(logPath, "r");
   try {
     const size = fs.fstatSync(descriptor).size;
-    if (size === 0) return "";
+    if (size === 0) return { text: "", position: 0 };
 
     const chunks: Buffer[] = [];
     const blockSize = 64 * 1024;
@@ -422,8 +430,86 @@ export function readWorkerLogTail(logPath: string, lineCount: number): string {
     const text = Buffer.concat(chunks).toString("utf-8");
     const lines = text.split(/\r?\n/);
     if (lines.at(-1) === "") lines.pop();
-    return lines.slice(-lineCount).join("\n") + (lines.length > 0 ? "\n" : "");
+    return {
+      text: lines.slice(-lineCount).join("\n") + (lines.length > 0 ? "\n" : ""),
+      position: size,
+    };
   } finally {
     fs.closeSync(descriptor);
   }
+}
+
+export function readWorkerLogTail(logPath: string, lineCount: number): string {
+  return readWorkerLogTailSnapshot(logPath, lineCount).text;
+}
+
+function logFileIdentity(stats: fs.Stats): string {
+  return `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`;
+}
+
+export async function followWorkerLog(options: {
+  logPath: string;
+  startPosition: number;
+  signal: AbortSignal;
+  onData: (chunk: string) => void | Promise<void>;
+  pollIntervalMs?: number;
+}): Promise<void> {
+  let position = Math.max(0, options.startPosition);
+  let identity: string | undefined;
+  const pollInterval = options.pollIntervalMs ?? 250;
+
+  while (!options.signal.aborted) {
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(options.logPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      position = 0;
+      identity = undefined;
+      await waitForLogPoll(options.signal, pollInterval);
+      continue;
+    }
+
+    const currentIdentity = logFileIdentity(stats);
+    if (identity === undefined) {
+      identity = currentIdentity;
+    } else if (identity !== currentIdentity) {
+      identity = currentIdentity;
+      position = 0;
+    }
+    if (stats.size < position) position = 0;
+
+    if (stats.size > position) {
+      const descriptor = fs.openSync(options.logPath, "r");
+      try {
+        while (position < stats.size && !options.signal.aborted) {
+          const length = Math.min(64 * 1024, stats.size - position);
+          const buffer = Buffer.allocUnsafe(length);
+          const bytesRead = fs.readSync(descriptor, buffer, 0, length, position);
+          if (bytesRead === 0) break;
+          position += bytesRead;
+          await options.onData(buffer.subarray(0, bytesRead).toString("utf-8"));
+        }
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      continue;
+    }
+
+    await waitForLogPoll(options.signal, pollInterval);
+  }
+}
+
+async function waitForLogPoll(signal: AbortSignal, delayMs: number): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(done, delayMs);
+    const onAbort = (): void => done();
+    function done(): void {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

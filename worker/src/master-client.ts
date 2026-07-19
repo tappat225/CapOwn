@@ -244,13 +244,17 @@ export class MasterClient {
    * Returns true on success. On 401/403, clears the session token
    * (caller should re-authenticate).
    */
-  async reportRuntime(workerId: string, plugins: PluginInfoItem[] = []): Promise<boolean> {
+  async reportRuntime(
+    workerId: string,
+    plugins: PluginInfoItem[] = [],
+    capabilities: string[] = [],
+  ): Promise<boolean> {
     const platform = getPlatformInfo();
     const body: WorkerReconnectRequest = {
       hostname: platform.hostname,
       os: platform.os,
       mode: "capability",
-      capabilities: [],
+      capabilities,
       workspace: "",
       plugins,
     };

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/capown/master/internal/auth"
@@ -27,6 +28,8 @@ type Server struct {
 	srv            *http.Server
 	pwHashSem      chan struct{} // semaphore for password hashing concurrency
 	taskStore      *tasks.Store
+	shutdown       chan struct{}
+	shutdownOnce   sync.Once
 }
 
 // NewServer creates a new Server with all dependencies.
@@ -58,6 +61,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		mux:            http.NewServeMux(),
 		pwHashSem:      make(chan struct{}, cfg.Master.PasswordHashConcurrency),
 		taskStore:      ts,
+		shutdown:       make(chan struct{}),
 	}
 
 	s.registerRoutes()
@@ -103,6 +107,7 @@ func (s *Server) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Graceful shutdown
+		s.signalShutdown()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return s.srv.Shutdown(shutdownCtx)
@@ -113,7 +118,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.signalShutdown()
 	return s.srv.Shutdown(ctx)
+}
+
+func (s *Server) signalShutdown() {
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
 }
 
 // registerRoutes sets up all HTTP routes.

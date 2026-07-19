@@ -227,11 +227,36 @@ describe("MasterClient", () => {
       path: "/v1/workers/wrk_runtime_test/runtime",
       status: 200,
       body: { worker_id: "wrk_runtime_test", hostname: "test-host", capabilities: [] },
+      match: (body) => {
+        const runtime = body as {
+          capabilities?: string[];
+          plugins?: Array<{ plugin_id?: string }>;
+        };
+        return (
+          runtime.capabilities?.includes("plugin.invoke") === true &&
+          runtime.plugins?.[0]?.plugin_id === "filesystem"
+        );
+      },
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
     client.sessionToken = "cown_sess_valid";
-    const ok = await client.reportRuntime("wrk_runtime_test");
+    const ok = await client.reportRuntime(
+      "wrk_runtime_test",
+      [
+        {
+          plugin_id: "filesystem",
+          version: "1.0.0",
+          kind: "mcp",
+          transport: "stdio",
+          enabled: true,
+          status: "running",
+          tools: [],
+          error: "",
+        },
+      ],
+      ["plugin.invoke"],
+    );
 
     assert.equal(ok, true);
   });

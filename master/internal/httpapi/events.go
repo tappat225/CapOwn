@@ -33,6 +33,10 @@ func (s *Server) handleDashboardEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	ch := s.dashBus.Subscribe(scope, lastEventID)
 	defer s.dashBus.Unsubscribe(scope, ch)
+	if _, err := w.Write([]byte(": connected\n\n")); err != nil {
+		return
+	}
+	flusher.Flush()
 
 	notify := r.Context().Done()
 	pingTicker := time.NewTicker(20 * time.Second)
@@ -43,6 +47,8 @@ func (s *Server) handleDashboardEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-notify:
+			return
+		case <-s.shutdown:
 			return
 
 		case <-pingTicker.C:

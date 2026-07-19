@@ -18,6 +18,7 @@ describe("parseArgs", () => {
     assert.equal(parseArgs(["status"]).command, "status");
     assert.equal(parseArgs(["logs"]).command, "logs");
     assert.equal(parseArgs(["logs", "--lines", "50"]).lines, 50);
+    assert.equal(parseArgs(["logs", "--no-follow"]).follow, false);
     assert.equal(parseArgs(["start", "--foreground"]).foreground, true);
     assert.equal(parseArgs(["start", "-f"]).foreground, true);
   });

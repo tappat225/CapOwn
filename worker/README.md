@@ -52,11 +52,14 @@ capown-worker status
 # Stop the background Worker
 capown-worker stop
 
-# Show the latest 200 log lines
+# Show the latest 200 lines, then follow new logs in real time
 capown-worker logs
 
-# Show a custom number of log lines
+# Follow with a custom initial number of lines
 capown-worker logs --lines 50
+
+# Show recent logs once and exit
+capown-worker logs --no-follow
 
 # Show config
 capown-worker config show
@@ -130,8 +133,9 @@ src/
    `status: running` and the current `delivery_id` before invoking its plugin.
    The claim loop continues while tasks execute so cancellation remains
    responsive.
-2. **Reports `mode: "capability"` and `capabilities: []`** -- Plugin metadata
-   is reported separately and execution is selected by claimed job type.
+2. **Reports `mode: "capability"` with aggregate capabilities** -- A healthy
+   plugin tool exposes the stable `plugin.invoke` capability, while concrete
+   plugin and tool metadata remains in the separate plugin snapshot.
 3. **Ed25519 keys via Node `crypto`** -- Raw 32-byte seed format matches
    PyNaCl for cross-language compatibility.
 4. **Minimal dependencies** -- Only `toml` (parser) and `zod` (validation).

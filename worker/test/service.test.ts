@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   getWorkerProcessInfo,
+  followWorkerLog,
   readWorkerLogTail,
   requestWorkerStop,
   startRuntimeControl,
@@ -86,6 +87,34 @@ describe("Worker logs", () => {
       assert.equal(readWorkerLogTail(logPath, 2), "three\nfour\n");
       assert.equal(readWorkerLogTail(logPath, 20), "one\ntwo\nthree\nfour\n");
     } finally {
+      fs.rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("streams appended log data until canceled", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "worker-log-follow-"));
+    const logPath = path.join(directory, "worker.log");
+    fs.writeFileSync(logPath, "existing\n", "utf-8");
+    const controller = new AbortController();
+    let output = "";
+    try {
+      const following = followWorkerLog({
+        logPath,
+        startPosition: fs.statSync(logPath).size,
+        signal: controller.signal,
+        pollIntervalMs: 10,
+        onData: (chunk) => {
+          output += chunk;
+          if (output.includes("second\n")) controller.abort();
+        },
+      });
+      fs.appendFileSync(logPath, "first\n", "utf-8");
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      fs.appendFileSync(logPath, "second\n", "utf-8");
+      await following;
+      assert.equal(output, "first\nsecond\n");
+    } finally {
+      controller.abort();
       fs.rmSync(directory, { force: true, recursive: true });
     }
   });
