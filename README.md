@@ -3,8 +3,8 @@
 
 Next generation of CapOwn core service. Components:
 
-- **`master/`** - Go HTTP API server (SQLite, Ed25519 auth, SSE)
-- **`worker/`** - TypeScript/Node Worker (connectivity-only milestone)
+- **`master/`** - Go HTTP API server (SQLite, Ed25519 auth, job claims, SSE wake)
+- **`worker/`** - TypeScript/Node Worker (job claims, plugin execution, SSE wake)
 - **`protocol/`** - Language-independent wire contract
 - **`scripts/`** - Installation helpers
 

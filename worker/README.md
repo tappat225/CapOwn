@@ -2,9 +2,10 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-> **This is a connectivity-only milestone.** Worker Next can join the CapOwn
-> control plane (register, authenticate, maintain an SSE connection) but does
-> **not** execute tasks or implement any file/shell/container capabilities.
+> Worker Next implements the current `/v1` Worker contract: registration,
+> authentication, runtime reporting, claim-based job execution, and optional
+> SSE wake acceleration. It does not implement file, shell, or container
+> capabilities.
 
 The Worker/Master wire contract is defined centrally in
 [`../protocol/openapi.yaml`](../protocol/openapi.yaml). The TypeScript types in
@@ -15,8 +16,10 @@ The Worker/Master wire contract is defined centrally in
 - [x] Project skeleton: CLI, logging, signal handling
 - [x] Configuration: TOML loading, env overrides, Zod validation
 - [x] Identity: Ed25519 keys, PyNaCl-compatible signing, identity.toml
-- [x] Master client: register, challenge-response auth, runtime PUT
-- [x] SSE parser and reconnecting client
+- [x] Master client: register, challenge-response auth, runtime PUT, job claim,
+  and task result reporting
+- [x] Claim-based task execution and cancellation
+- [x] Optional SSE wake stream with reconnect
 - [x] Cross-language signature verification (Node <-> PyNaCl)
 - [x] Installation script: `install-worker.sh` / `install-worker.ps1`
 - [x] Registration flow: `capown-worker register <link>`
@@ -80,17 +83,19 @@ src/
   platform.ts       Hostname and OS detection
   protocol.ts       TypeScript types for the current Master API protocol
   master-client.ts  HTTP client for Master endpoints
-  sse.ts            SSE parser and reconnecting client
-  daemon.ts         Main lifecycle loop
+  sse.ts            SSE parser and wake stream client
+  daemon.ts         Main lifecycle and job claim loop
 ```
 
 ## Design Decisions
 
-1. **No task execution in this milestone** -- Worker Next only joins the
-   control plane. Task execution, backends, tools, and containers are out of
-   scope.
-2. **Reports `mode: "capability"` and `capabilities: []`** -- The Master
-   fix distinguishes `None` (legacy defaults) from an explicit empty list.
+1. **Claim is authoritative** -- Jobs are received through
+   `POST /v1/workers/{worker_id}/jobs/claim`; SSE can only accelerate the next
+   claim with a `wake` event and never interrupts an active claim. The Worker
+   confirms a task with `status: running` and the current `delivery_id` before
+   invoking its plugin.
+2. **Reports `mode: "capability"` and `capabilities: []`** -- Plugin metadata
+   is reported separately and execution is selected by claimed job type.
 3. **Ed25519 keys via Node `crypto`** -- Raw 32-byte seed format matches
    PyNaCl for cross-language compatibility.
 4. **Minimal dependencies** -- Only `toml` (parser) and `zod` (validation).

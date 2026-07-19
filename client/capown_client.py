@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Minimal CapOwn Next REST Client -- task and plugin operations.
 
-Standard-library only (urllib). Targets the v1.2 protocol.
+Standard-library only (urllib). Targets the v1.4 protocol.
 """
 
 from __future__ import annotations

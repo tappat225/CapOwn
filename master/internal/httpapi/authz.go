@@ -56,8 +56,8 @@ func (s *Server) resolveWebSession(r *http.Request) (*AuthContext, *domain.APIEr
 	if user == nil {
 		return nil, domain.NewAPIError(domain.ErrUnauthorized, "user not found", http.StatusUnauthorized)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 	return &AuthContext{
 		TokenType: "web",
@@ -103,8 +103,8 @@ func (s *Server) resolveAdminToken(r *http.Request) (*AuthContext, *domain.APIEr
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 	if user.Role != "admin" {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "admin role required", http.StatusForbidden)
@@ -176,8 +176,8 @@ func (s *Server) resolveClientAPI(r *http.Request) (*AuthContext, *domain.APIErr
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 
 	return &AuthContext{
@@ -229,8 +229,8 @@ func (s *Server) resolveAPI(r *http.Request) (*AuthContext, *domain.APIError) {
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 
 	return &AuthContext{

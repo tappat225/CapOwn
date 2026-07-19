@@ -27,12 +27,18 @@ func (s *Server) handleDashboardEvents(w http.ResponseWriter, r *http.Request) {
 	// Get last event ID from header
 	lastEventID := r.Header.Get("Last-Event-ID")
 
-	ch := s.dashBus.Subscribe(ctx.UserID, lastEventID)
-	defer s.dashBus.Unsubscribe(ctx.UserID, ch)
+	scope := ctx.UserID
+	if ctx.Role == "admin" {
+		scope = events.AdminGlobalScope
+	}
+	ch := s.dashBus.Subscribe(scope, lastEventID)
+	defer s.dashBus.Unsubscribe(scope, ch)
 
 	notify := r.Context().Done()
 	pingTicker := time.NewTicker(20 * time.Second)
 	defer pingTicker.Stop()
+	authTicker := time.NewTicker(5 * time.Second)
+	defer authTicker.Stop()
 
 	for {
 		select {
@@ -44,6 +50,12 @@ func (s *Server) handleDashboardEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
+
+		case <-authTicker.C:
+			user, err := s.store.GetUserByID(ctx.UserID)
+			if err != nil || user == nil || user.Status != "active" {
+				return
+			}
 
 		case evt, ok := <-ch:
 			if !ok {

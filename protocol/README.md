@@ -20,53 +20,47 @@ when that behavior is not observable on the wire.
 
 The plugin extension is documented in
 [`plugin-protocol.md`](./plugin-protocol.md) and is included in
-`openapi.yaml` starting from v1.2.
+the current `openapi.yaml` contract.
 
-## Scope of v1.1
+## Scope of v1
 
-v1.1 renames Worker enrollment to Worker registration:
-
-- All `enroll` / `enrollment` identifiers are renamed to `register` /
-  `registration`.
-- Registration tokens now use the `cown_register_*` prefix.
-- The Master returns an optional `registration_url` when `CAPOWN_MASTER_PUBLIC_URL`
-  is configured, providing a ready-to-use `capown-worker register` link.
-
-v1.1 still covers the connectivity milestone:
+The current `/v1` contract covers:
 
 - health and metadata;
 - first-user registration and web sessions;
+- administrator-issued invitation registration for normal users;
 - client/admin token management;
 - Worker registration-token management;
 - Worker registration;
 - Worker Ed25519 challenge-response authentication;
 - Worker runtime metadata and liveness;
-- Worker-to-Master SSE; and
-- dashboard SSE events.
+- optional Worker wake SSE and dashboard SSE events;
+- Worker job claiming with `POST /v1/workers/{worker_id}/jobs/claim`;
+- plugin discovery, task dispatch, task results, and task cancellation;
+- `plugin_call` execution through MCP-over-stdio plugins; and
+- persistent plugin enable/disable control through the Worker task channel.
 
-v1.2 adds plugin discovery, task dispatch, task results, and task cancellation.
-The first supported task type is `plugin_call`. Only MCP-over-stdio plugins
-are supported in this version.
+Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
+
+- Worker SSE is optional and may only send `wake` events;
+- claimed task jobs remain `pending` until the Worker reports `running` with
+  the current `delivery_id` before execution;
+- interrupted, unconfirmed deliveries are made claimable again after a short
+  internal lease; and
+- Cancel requests for running tasks are claimed as `cancel` jobs.
+- Task payloads are no longer pushed over SSE.
 
 ## Versioning policy
 
-1. The URL prefix (`/v1`) is the major protocol version. A breaking wire
-   change requires a new prefix such as `/v2`.
-2. `info.version` in the OpenAPI document uses SemVer. Patch releases clarify
-   wording or correct documentation. Minor releases may add optional response
-   fields, new event types, or new endpoints without changing existing
-   semantics.
-3. Existing required fields, field meanings, authentication rules, status
-   codes, error codes, and event semantics MUST NOT be changed in a compatible
-   minor release.
-4. Every implementation MUST ignore unknown response fields and unknown SSE
+1. `/v1` is the only protocol prefix during this pre-user development stage.
+   Breaking changes update the current contract in place; do not add `/v2`,
+   compatibility shims, or parallel protocol implementations.
+2. `info.version` uses SemVer to identify the current contract. The Master,
+   Worker, and protocol definitions are updated together for each wire change.
+3. Every implementation MUST ignore unknown response fields and unknown SSE
    data fields.
-5. Current v1 request handlers reject unknown JSON fields. Clients MUST send
-   only fields defined for the endpoint; a future additive request field must
-   be introduced together with an implementation update or an explicit
-   capability negotiation mechanism.
-6. Deprecated endpoints and fields remain documented for at least one minor
-   release before removal, unless they are security-sensitive.
+4. Current v1 request handlers reject unknown JSON fields. Clients MUST send
+   only fields defined for the current endpoint.
 
 ## Wire conventions
 
@@ -91,12 +85,11 @@ are supported in this version.
 For every protocol change:
 
 1. update `openapi.yaml` first;
-2. classify the change as patch, compatible minor, or breaking major;
+2. classify the change as patch or contract revision;
 3. add or update cross-language contract tests;
 4. update Go, TypeScript, and Python types/clients;
 5. record migration notes in the same change; and
-6. verify that old clients can still consume the changed responses when the
-   change is declared compatible.
+6. verify the Master and Worker against the complete current contract.
 
-The task protocol should be added as a separate, reviewable extension. It
-should not be silently reconstructed from the legacy Python implementation.
+The current task protocol is a separate, reviewable extension. It must not be
+silently reconstructed from the legacy Python implementation.

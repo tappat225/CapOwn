@@ -36,14 +36,24 @@ describe("SSEParser", () => {
     assert.equal(events[0].data, "{}");
   });
 
+  it("parses a wake event", () => {
+    const parser = new SSEParser();
+    const events = parser.feed(
+      'event: wake\ndata: {"reason":"jobs_available"}\n\n',
+    );
+    assert.equal(events.length, 1);
+    assert.equal(events[0].event, "wake");
+    assert.equal(events[0].data, '{"reason":"jobs_available"}');
+  });
+
   it("handles multiline data:", () => {
     const parser = new SSEParser();
     const events = parser.feed(
-      "event: task\ndata: {\"task_id\":\"abc\"}\ndata: {\"more\":true}\n\n",
+      "event: notice\ndata: {\"id\":\"abc\"}\ndata: {\"more\":true}\n\n",
     );
     assert.equal(events.length, 1);
-    assert.equal(events[0].event, "task");
-    assert.equal(events[0].data, '{"task_id":"abc"}\n{"more":true}');
+    assert.equal(events[0].event, "notice");
+    assert.equal(events[0].data, '{"id":"abc"}\n{"more":true}');
   });
 
   it("reports comments (lines starting with :)", () => {
@@ -59,13 +69,13 @@ describe("SSEParser", () => {
     const parser = new SSEParser();
 
     // First chunk: partial event
-    const events1 = parser.feed("event: task\nda");
+    const events1 = parser.feed("event: notice\nda");
     assert.equal(events1.length, 0);
 
     // Second chunk: rest of data + blank line
     const events2 = parser.feed('ta: {"key":"val"}\n\n');
     assert.equal(events2.length, 1);
-    assert.equal(events2[0].event, "task");
+    assert.equal(events2[0].event, "notice");
     assert.equal(events2[0].data, '{"key":"val"}');
   });
 
@@ -84,11 +94,11 @@ describe("SSEParser", () => {
   it("handles multiple events in one chunk", () => {
     const parser = new SSEParser();
     const events = parser.feed(
-      "event: ping\ndata: {}\n\nevent: task\ndata: {\"id\":1}\n\n",
+      "event: ping\ndata: {}\n\nevent: notice\ndata: {\"id\":1}\n\n",
     );
     assert.equal(events.length, 2);
     assert.equal(events[0].event, "ping");
-    assert.equal(events[1].event, "task");
+    assert.equal(events[1].event, "notice");
   });
 
   it("flushes remaining data", () => {

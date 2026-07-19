@@ -22,6 +22,38 @@ type adminPatchUserRequest struct {
 	Status   string `json:"status"`
 }
 
+func (s *Server) disconnectUserWorkers(userID string, revoke bool) error {
+	workers, err := s.store.ListOwnedWorkers(userID)
+	if err != nil {
+		return err
+	}
+	for _, worker := range workers {
+		s.taskStore.BlockWorker(worker.WorkerID)
+		s.workerBroker.DrainAndClose(worker.WorkerID)
+		s.store.MarkOffline(worker.WorkerID)
+		if revoke {
+			if err := s.store.RevokeWorkerAtomic(worker.WorkerID, userID); err != nil {
+				return err
+			}
+			s.dashBus.PublishWorker(userID, "worker.revoked", map[string]string{"worker_id": worker.WorkerID})
+		} else {
+			s.dashBus.PublishWorker(userID, "worker.offline", map[string]string{"worker_id": worker.WorkerID})
+		}
+	}
+	return nil
+}
+
+func (s *Server) unblockUserWorkers(userID string) error {
+	workers, err := s.store.ListOwnedWorkers(userID)
+	if err != nil {
+		return err
+	}
+	for _, worker := range workers {
+		s.taskStore.UnblockWorker(worker.WorkerID)
+	}
+	return nil
+}
+
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	_, apiErr := s.resolveAdminToken(r)
 	if apiErr != nil {
@@ -37,6 +69,9 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]map[string]interface{}, 0, len(users))
 	for _, u := range users {
+		if u.Status == "deleted" {
+			continue
+		}
 		views = append(views, store.UserToDomain(u))
 	}
 
@@ -101,7 +136,7 @@ func (s *Server) handleAdminGetUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInternalResponse)
 		return
 	}
-	if user == nil {
+	if user == nil || user.Status == "deleted" {
 		writeErrorCode(w, http.StatusNotFound, domain.ErrUserNotFound, "user not found")
 		return
 	}
@@ -127,7 +162,7 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInternalResponse)
 		return
 	}
-	if user == nil {
+	if user == nil || user.Status == "deleted" {
 		writeErrorCode(w, http.StatusNotFound, domain.ErrUserNotFound, "user not found")
 		return
 	}
@@ -177,8 +212,18 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 
 		// Revoke all sessions when disabling
 		if req.Status == "disabled" {
-			s.store.RevokeAllUserSessions(user.UserID)
+			_, _ = s.store.RevokeAllUserSessions(user.UserID)
 			s.workerSessions.RevokeUser(user.UserID)
+			s.dashBus.CloseScope(user.UserID)
+			if err := s.disconnectUserWorkers(user.UserID, false); err != nil {
+				writeError(w, domain.ErrInternalResponse)
+				return
+			}
+		} else if req.Status == "active" {
+			if err := s.unblockUserWorkers(user.UserID); err != nil {
+				writeError(w, domain.ErrInternalResponse)
+				return
+			}
 		}
 	}
 
@@ -189,7 +234,7 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Admin forcing password reset: revoke all sessions
-		s.store.RevokeAllUserSessions(user.UserID)
+		_, _ = s.store.RevokeAllUserSessions(user.UserID)
 		s.workerSessions.RevokeUser(user.UserID)
 	}
 
@@ -204,6 +249,43 @@ func (s *Server) handleAdminPatchUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 	}
+}
+
+func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	ctx, apiErr := s.resolveAdminToken(r)
+	if apiErr != nil {
+		writeError(w, apiErr)
+		return
+	}
+	username := r.PathValue("username")
+	user, err := s.store.GetUser(username)
+	if err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	if user == nil || user.Status == "deleted" {
+		writeErrorCode(w, http.StatusNotFound, domain.ErrUserNotFound, "user not found")
+		return
+	}
+	if ctx.UserID == user.UserID {
+		writeErrorCode(w, http.StatusForbidden, domain.ErrForbidden, "cannot delete the current account")
+		return
+	}
+	if err := s.store.SetUserStatus(user.UserID, "deleted"); err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	_, _ = s.store.RevokeAllUserSessions(user.UserID)
+	_, _ = s.store.RevokeAllUserTokens(user.UserID)
+	_, _ = s.store.RevokeAllUserRegistrationTokens(user.UserID)
+	_ = s.store.RevokeInvitationsByCreator(user.UserID)
+	s.workerSessions.RevokeUser(user.UserID)
+	s.dashBus.CloseScope(user.UserID)
+	if err := s.disconnectUserWorkers(user.UserID, true); err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminListUserTokens(w http.ResponseWriter, r *http.Request) {

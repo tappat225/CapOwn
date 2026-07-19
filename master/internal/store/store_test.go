@@ -1,9 +1,11 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -89,6 +91,69 @@ func TestRegisterFirstUser(t *testing.T) {
 	}
 	if user.PasswordHash == "" {
 		t.Error("password should be set")
+	}
+}
+
+func TestInvitationRegistrationIsSingleUseAndAtomic(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, invitation, err := s.CreateInvitation(adminID, "new teammate", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code == "" || invitation.CodeHash == code || invitation.CodePrefix == "" {
+		t.Fatal("invitation secret handling is invalid")
+	}
+
+	userID, session, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userID == "" || session == "" {
+		t.Fatal("invited registration did not create a user session")
+	}
+	user, err := s.GetUser("alice")
+	if err != nil || user == nil || user.Role != "user" {
+		t.Fatalf("unexpected invited user: %#v, %v", user, err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "bob", "secret1", 3600); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("reused invitation should fail, got %v", err)
+	}
+}
+
+func TestUsernameConflictDoesNotConsumeInvitation(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := s.CreateInvitation(adminID, "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "admin", "secret1", 3600); !errors.Is(err, ErrUsernameConflict) {
+		t.Fatalf("expected username conflict, got %v", err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600); err != nil {
+		t.Fatalf("invitation should remain usable after a rolled-back conflict: %v", err)
+	}
+}
+
+func TestExpiredInvitationIsRejected(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := s.CreateInvitation(adminID, "", -time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("expired invitation should fail, got %v", err)
 	}
 }
 

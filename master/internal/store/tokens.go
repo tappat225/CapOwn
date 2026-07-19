@@ -153,6 +153,17 @@ func (s *Store) RevokeToken(tokenID string) error {
 	return nil
 }
 
+// RevokeAllUserTokens revokes every non-revoked client or admin token for a user.
+func (s *Store) RevokeAllUserTokens(userID string) (int, error) {
+	now := NowISO()
+	res, err := s.db.Exec(`UPDATE auth_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // TouchToken updates last_used_at for a token.
 func (s *Store) TouchToken(tokenID string) error {
 	now := NowISO()

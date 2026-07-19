@@ -330,6 +330,13 @@ def main() -> int:
             timeout_seconds=5,
         )
         canceled = client.cancel_task(cancel_task["task_id"])
+        if canceled.get("status") not in {"running", "canceled"}:
+            print(f"[e2e] FAIL: Unexpected cancel response {canceled.get('status')}")
+            return 1
+        deadline = time.time() + 5
+        while time.time() < deadline and canceled.get("status") == "running":
+            time.sleep(0.1)
+            canceled = client.get_task(cancel_task["task_id"])
         if canceled.get("status") != "canceled":
             print(f"[e2e] FAIL: Expected canceled, got {canceled.get('status')}")
             return 1

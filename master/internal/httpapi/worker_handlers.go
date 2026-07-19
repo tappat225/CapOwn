@@ -51,7 +51,6 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
 	// Validate required fields
 	if req.RegistrationToken == "" {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "registration_token is required")
@@ -109,7 +108,7 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 	// Notify dashboard
 	owner, _ := s.store.GetOwner(workerID)
 	if owner != nil {
-		s.dashBus.Publish(owner.UserID, "worker.registered", map[string]interface{}{
+		s.dashBus.PublishWorker(owner.UserID, "worker.registered", map[string]interface{}{
 			"worker_id":   workerID,
 			"worker_name": req.WorkerName,
 		})
@@ -211,8 +210,8 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInternalResponse)
 		return
 	}
-	if ownerUser == nil || ownerUser.Status == "disabled" {
-		writeErrorCode(w, http.StatusForbidden, domain.ErrForbidden, "worker owner is disabled")
+	if ownerUser == nil || ownerUser.Status != "active" {
+		writeErrorCode(w, http.StatusForbidden, domain.ErrUserDisabled, "worker owner is disabled")
 		return
 	}
 
@@ -240,6 +239,10 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if req.Plugins == nil {
+		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugins is required")
+		return
+	}
 
 	capStr := strings.Join(req.Capabilities, ",")
 	mode := req.Mode
@@ -248,32 +251,31 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pluginsStr := ""
-	if req.Plugins != nil {
-		for _, plugin := range *req.Plugins {
-			if plugin.PluginID == "" || plugin.Version == "" || plugin.Kind == "" || plugin.Transport == "" {
-				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin metadata is incomplete")
-				return
-			}
-			switch plugin.Status {
-			case "starting", "running", "stopped", "error", "disabled":
-			default:
-				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid plugin status")
-				return
-			}
-			for _, tool := range plugin.Tools {
-				if tool.Name == "" {
-					writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin tool name is required")
-					return
-				}
-			}
-		}
-		encoded, err := json.Marshal(req.Plugins)
-		if err != nil {
-			writeError(w, domain.ErrInternalResponse)
+	for _, plugin := range *req.Plugins {
+		if plugin.PluginID == "" || plugin.Version == "" || plugin.Kind == "" || plugin.Transport == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin metadata is incomplete")
 			return
 		}
-		pluginsStr = string(encoded)
+		switch plugin.Status {
+		case "starting", "running", "stopped", "error", "disabled":
+		default:
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid plugin status")
+			return
+		}
+		for _, tool := range plugin.Tools {
+			if tool.Name == "" {
+				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin tool name is required")
+				return
+			}
+		}
 	}
+	encoded, err := json.Marshal(req.Plugins)
+	if err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	pluginsStr = string(encoded)
+	previousWorker, _ := s.store.GetActiveWorker(workerID)
 
 	_, becameOnline, err := s.store.ReconnectWorker(workerID, req.Hostname, req.OS, mode, capStr, req.Workspace, pluginsStr)
 	if err != nil {
@@ -283,7 +285,12 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if becameOnline {
-		s.dashBus.Publish(ctx.UserID, "worker.online", map[string]string{
+		s.dashBus.PublishWorker(ctx.UserID, "worker.online", map[string]string{
+			"worker_id": workerID,
+		})
+	}
+	if previousWorker == nil || !previousWorker.Plugins.Valid || previousWorker.Plugins.String != pluginsStr {
+		s.dashBus.PublishWorker(ctx.UserID, "worker.plugins_updated", map[string]string{
 			"worker_id": workerID,
 		})
 	}
@@ -327,10 +334,10 @@ func (s *Server) handleWorkerEvents(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		// Only the current generation may transition the worker offline.
 		// A replaced or administratively closed stream must not overwrite
-		// the state of a newer connection.
-		if s.workerBroker.Disconnect(workerID, ch, gen) {
+		// the state of a newer connection. Job long-polls also count as online.
+		if s.workerBroker.Disconnect(workerID, ch, gen) && !s.taskStore.HasPoller(workerID) {
 			s.store.MarkOffline(workerID)
-			s.dashBus.Publish(ctx.UserID, "worker.offline", map[string]string{
+			s.dashBus.PublishWorker(ctx.UserID, "worker.offline", map[string]string{
 				"worker_id": workerID,
 			})
 		}
@@ -338,7 +345,7 @@ func (s *Server) handleWorkerEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Mark worker online on SSE connect — only updates status/heartbeat, preserves runtime metadata
 	s.store.SetOnline(workerID)
-	s.dashBus.Publish(ctx.UserID, "worker.online", map[string]string{
+	s.dashBus.PublishWorker(ctx.UserID, "worker.online", map[string]string{
 		"worker_id": workerID,
 	})
 

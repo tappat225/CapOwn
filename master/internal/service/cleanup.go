@@ -9,10 +9,11 @@ import (
 	"github.com/capown/master/internal/broker"
 	"github.com/capown/master/internal/events"
 	"github.com/capown/master/internal/store"
+	"github.com/capown/master/internal/tasks"
 )
 
 // RunWorkerSweeper marks stale workers offline.
-func RunWorkerSweeper(ctx context.Context, s *store.Store, b *broker.WorkerBroker, db *events.DashboardBus, timeoutSeconds int) {
+func RunWorkerSweeper(ctx context.Context, s *store.Store, b *broker.WorkerBroker, db *events.DashboardBus, ts *tasks.Store, timeoutSeconds int) {
 	interval := time.Duration(timeoutSeconds/2) * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -28,7 +29,17 @@ func RunWorkerSweeper(ctx context.Context, s *store.Store, b *broker.WorkerBroke
 				continue
 			}
 			for _, workerID := range stale {
+				// A long-poll keeps the Worker alive even though it cannot update
+				// its heartbeat until the request returns.
+				if ts != nil && ts.HasPoller(workerID) {
+					continue
+				}
 				slog.Warn("worker stale, marking offline", "worker_id", workerID)
+				if ts != nil {
+					if recovered := ts.RecoverWorker(workerID); recovered > 0 {
+						slog.Warn("recovered tasks from stale worker", "worker_id", workerID, "count", recovered)
+					}
+				}
 				s.MarkOffline(workerID)
 				b.DrainAndClose(workerID)
 				db.PublishByWorker(workerID, "worker.offline",

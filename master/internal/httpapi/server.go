@@ -82,7 +82,7 @@ func (s *Server) Handler() http.Handler {
 // Start begins the HTTP server and background jobs, blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	// Start background cleanup jobs
-	go service.RunWorkerSweeper(ctx, s.store, s.workerBroker, s.dashBus, s.config.Master.HeartbeatTimeout)
+	go service.RunWorkerSweeper(ctx, s.store, s.workerBroker, s.dashBus, s.taskStore, s.config.Master.HeartbeatTimeout)
 	go service.RunChallengeCleaner(ctx, s.challenges, 60*time.Second)
 	go service.RunSessionCleaner(ctx, s.workerSessions, 60*time.Second)
 	go service.RunExpiredSessionCleaner(ctx, s.store, 5*time.Minute)
@@ -158,6 +158,10 @@ func (s *Server) registerRoutes() {
 
 	// Plugin routes
 	s.mux.HandleFunc("GET /v1/workers/{worker_id}/plugins", s.handleListWorkerPlugins)
+	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}/plugins/{plugin_id}", s.handleSetWorkerPluginEnabled)
+
+	// Worker job claim (long-poll)
+	s.mux.HandleFunc("POST /v1/workers/{worker_id}/jobs/claim", s.handleClaimJobs)
 
 	// Task routes
 	s.mux.HandleFunc("POST /v1/tasks", s.handleDispatchTask)
@@ -173,6 +177,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/admin/users", s.handleAdminCreateUser)
 	s.mux.HandleFunc("GET /v1/admin/users/{username}", s.handleAdminGetUser)
 	s.mux.HandleFunc("PATCH /v1/admin/users/{username}", s.handleAdminPatchUser)
+	s.mux.HandleFunc("DELETE /v1/admin/users/{username}", s.handleAdminDeleteUser)
+	s.mux.HandleFunc("GET /v1/admin/invitations", s.handleAdminListInvitations)
+	s.mux.HandleFunc("POST /v1/admin/invitations", s.handleAdminCreateInvitation)
+	s.mux.HandleFunc("DELETE /v1/admin/invitations/{invitation_id}", s.handleAdminRevokeInvitation)
 	s.mux.HandleFunc("GET /v1/admin/users/{username}/tokens", s.handleAdminListUserTokens)
 	s.mux.HandleFunc("POST /v1/admin/users/{username}/tokens", s.handleAdminCreateUserToken)
 	s.mux.HandleFunc("DELETE /v1/admin/tokens/{token_id}", s.handleAdminDeleteToken)
@@ -196,7 +204,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
 		Version:         "0.1.0",
-		ProtocolVersion: "1.1",
+		ProtocolVersion: "1.6",
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { join } from "node:path";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { loadManifests } from "./manifest.js";
 import { PluginRegistry } from "./registry.js";
 import type { PluginInfo, PluginCallResult, ContentBlock } from "./types.js";
@@ -22,11 +23,11 @@ export class PluginManager {
   async loadPlugins(): Promise<void> {
     const manifests = await loadManifests(this.pluginsDir);
 
-    for (const manifest of manifests) {
+    for (const loaded of manifests) {
       try {
-        this.registry.register(manifest);
+        this.registry.register(loaded.manifest, loaded.path);
       } catch (err) {
-        console.warn(`[plugins] failed to register "${manifest.plugin_id}":`, (err as Error).message);
+        console.warn(`[plugins] failed to register "${loaded.manifest.plugin_id}":`, (err as Error).message);
       }
     }
 
@@ -61,6 +62,44 @@ export class PluginManager {
 
   onSnapshotsChanged(listener: (info: PluginInfo[]) => void): () => void {
     return this.registry.onSnapshotsChanged(listener);
+  }
+
+  async setPluginEnabled(pluginId: string, enabled: boolean): Promise<PluginInfo> {
+    const plugin = this.registry.get(pluginId);
+    if (!plugin) {
+      throw new PluginError(PluginErrorCodes.PluginNotFound, `plugin "${pluginId}" not found`);
+    }
+
+    await this.persistEnabled(plugin.manifestPath, enabled);
+    plugin.manifest.enabled = enabled;
+
+    const restartTimer = this.restartTimers.get(pluginId);
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      this.restartTimers.delete(pluginId);
+    }
+    this.restartCounts.delete(pluginId);
+
+    if (enabled) {
+      if (plugin.adapter.status !== "running") await plugin.adapter.start();
+    } else {
+      await plugin.adapter.stop();
+    }
+    this.registry.emitSnapshotsChanged();
+    return plugin.adapter.getInfo();
+  }
+
+  private async persistEnabled(manifestPath: string, enabled: boolean): Promise<void> {
+    const raw = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+    raw.enabled = enabled;
+    const temporaryPath = `${manifestPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      await writeFile(temporaryPath, JSON.stringify(raw, null, 2) + "\n", { encoding: "utf-8" });
+      await rename(temporaryPath, manifestPath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
   }
 
   async invokePlugin(

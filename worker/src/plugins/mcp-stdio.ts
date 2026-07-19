@@ -194,6 +194,7 @@ export class McpStdioAdapter extends EventEmitter {
       version: this.manifest.version,
       kind: this.manifest.kind,
       transport: this.manifest.transport,
+      enabled: this.manifest.enabled,
       status: this.status,
       tools: this._tools,
       error: this._error,

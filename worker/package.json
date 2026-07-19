@@ -1,7 +1,7 @@
 {
   "name": "@capown/worker-next",
   "version": "0.1.0",
-  "description": "Next-generation CapOwn Worker (TypeScript) -- connectivity-only milestone.",
+  "description": "Next-generation CapOwn Worker (TypeScript) with claim-based jobs.",
   "private": true,
   "type": "module",
   "main": "dist/src/cli.js",

@@ -1,17 +1,18 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 1.2.0
+  version: 1.6.0
   description: |
-    Language-independent v1.2 wire contract for the CapOwn control plane.
+    Language-independent v1.6 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
-    results, cancellation, and plugin invocation via the `plugin_call`
-    task type.
+    claim-based job delivery, results, cancellation, and plugin invocation
+    via the `plugin_call` task type. Workers claim jobs via long-poll;
+    SSE is an optional wake accelerator.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "1.2"
+  x-capown-protocol-version: "1.6"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -25,6 +26,9 @@ info:
     - plugin_concurrency_exceeded
   x-capown-task-error-codes:
     - worker_offline
+  x-capown-auth-error-codes:
+    - user_disabled
+    - invitation_invalid
 
 servers:
   - url: http://localhost:9210
@@ -87,16 +91,19 @@ paths:
   /v1/auth/register:
     post:
       tags: [auth]
-      summary: Register the first user
-      description: Registration succeeds only while the Master has no users.
-      operationId: registerFirstUser
+      summary: Register a Master user
+      description: |
+        The first user becomes an administrator and does not provide an
+        invitation code. Once initialized, registration creates a normal user
+        and requires a valid, unused administrator invitation code.
+      operationId: registerUser
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CredentialsRequest'
+              $ref: '#/components/schemas/RegisterRequest'
       responses:
         "201":
           description: User created and a web session issued.
@@ -108,6 +115,74 @@ paths:
           $ref: '#/components/responses/InvalidInput'
         "409":
           $ref: '#/components/responses/Conflict'
+
+  /v1/admin/invitations:
+    get:
+      tags: [admin, invitations]
+      summary: List user invitations
+      operationId: adminListInvitations
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      responses:
+        "200":
+          description: Invitation list without plaintext codes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [admin, invitations]
+      summary: Create a one-time user invitation
+      operationId: adminCreateInvitation
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvitationRequest'
+      responses:
+        "201":
+          description: Invitation created. The plaintext code is returned only here.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedInvitation'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/invitations/{invitation_id}:
+    delete:
+      tags: [admin, invitations]
+      summary: Revoke a user invitation
+      operationId: adminRevokeInvitation
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      parameters:
+        - $ref: '#/components/parameters/InvitationId'
+      responses:
+        "204":
+          description: Invitation revoked.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
 
   /v1/auth/login:
     post:
@@ -566,15 +641,59 @@ paths:
         "404":
           $ref: '#/components/responses/WorkerNotFound'
 
+  /v1/workers/{worker_id}/plugins/{plugin_id}:
+    patch:
+      tags: [plugins, workers]
+      summary: Enable or disable a Worker plugin
+      description: |
+        Persistently changes the local plugin manifest through the Worker task
+        channel. The Worker must be online. This endpoint cannot change plugin
+        commands, environment variables, permissions, or installation state.
+      operationId: setWorkerPluginEnabled
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - $ref: '#/components/parameters/WorkerId'
+        - $ref: '#/components/parameters/PluginId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPluginEnabledRequest'
+      responses:
+        "202":
+          description: Plugin state change task accepted.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        "400":
+          $ref: '#/components/responses/TaskRequestRejected'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
   /v1/workers/{worker_id}/events:
     get:
       tags: [events, workers]
-      summary: Open the Worker command/event SSE stream
+      summary: Open the optional Worker wake SSE stream
       description: |
         This stream is authenticated with a Worker session and is consumed by
-        the Worker. The Master dispatches `task` events on this stream for
-        the Worker to process. Heartbeat comments (`: ping`) are sent at
-        regular intervals.
+        the Worker. It is an optional accelerator only: the Master may emit
+        `wake` events when jobs are available so the Worker can claim sooner.
+        Task payloads are never delivered on this stream. Correctness depends
+        on `POST /v1/workers/{worker_id}/jobs/claim`, not on SSE connectivity.
+        Heartbeat comments (`: ping`) are sent at regular intervals.
       operationId: workerEventStream
       security:
         - bearerAuth: []
@@ -596,6 +715,84 @@ paths:
         "404":
           $ref: '#/components/responses/WorkerNotFound'
 
+  /v1/workers/{worker_id}/jobs/claim:
+    post:
+      tags: [tasks, workers]
+      summary: Claim pending jobs for this Worker (long-poll)
+      description: |
+        Reserve pending work and cancel jobs for delivery to the authenticated
+        Worker. This endpoint is the source of truth for task delivery.
+
+        When `wait_seconds` is greater than zero and no jobs are immediately
+        available, the Master holds the request until jobs arrive or the wait
+        expires. An empty `jobs` array is returned on timeout.
+
+        A returned `task` job has a short internal delivery lease. The task
+        remains `pending` until the Worker confirms receipt by reporting
+        `status: running` with the job's opaque `delivery_id`. The Worker MUST
+        confirm receipt before execution and include the same `delivery_id` in
+        every later result for that execution.
+        If confirmation does not arrive before the lease expires, the Master
+        makes the job claimable again.
+
+        A returned `cancel` job is also leased and may be delivered again until
+        the Worker reports a terminal task result. Workers MUST therefore treat
+        task and cancel delivery as idempotent. The optional SSE `wake` event
+        MUST NOT cancel an active claim request.
+
+        A Worker is considered online for dispatch while it has an open SSE
+        stream or an active long-poll claim request.
+      operationId: claimWorkerJobs
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [worker]
+      parameters:
+        - $ref: '#/components/parameters/WorkerId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 1
+          description: Maximum number of jobs to claim.
+        - name: wait_seconds
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 30
+            default: 25
+          description: |
+            Long-poll wait in seconds. `0` returns immediately with whatever
+            jobs are available (possibly empty).
+      responses:
+        "200":
+          description: Claimed jobs, or an empty list when none were available.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Vary:
+              schema:
+                type: string
+                const: Authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerJobsResponse'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/WorkerNotFound'
+
   /v1/events:
     get:
       tags: [events]
@@ -603,7 +800,9 @@ paths:
       description: |
         Dashboard events include an SSE id and can be replayed by sending the
         Last-Event-ID request header. A resync event is emitted when the id is
-        no longer available in the in-memory history.
+        no longer available in the in-memory history. Normal users receive
+        events for their own resources. Administrators receive the global
+        Worker event stream for every user.
       operationId: dashboardEventStream
       security:
         - bearerAuth: []
@@ -625,15 +824,24 @@ paths:
                 description: SSE wire stream. See components.schemas.DashboardSSEEnvelope.
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
 
   /v1/tasks:
     post:
       tags: [tasks]
       summary: Dispatch a task to a Worker
       description: |
-        Dispatch a task to a Worker. When `?wait=true`, the Master blocks
-        until the task completes or the request timeout is reached. Without
-        `?wait`, the task is accepted and processed asynchronously.
+        Enqueue a task for a Worker. The Worker claims the task later via
+        `POST /v1/workers/{worker_id}/jobs/claim`. When `?wait=true`, the Master
+        blocks until the task reaches a terminal status or the request
+        timeout is reached. Without `?wait`, the task is accepted as
+        `pending` and processed asynchronously.
+
+        The target Worker must be online (open SSE stream or active job
+        long-poll). Offline dispatch is rejected with `worker_offline`.
+        If the Worker has an open SSE stream, the Master may send a best-effort
+        `wake` event; wake delivery failure does not fail the dispatch.
       operationId: dispatchTask
       security:
         - bearerAuth: []
@@ -685,8 +893,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Task'
-        "503":
-          $ref: '#/components/responses/WorkerUnavailable'
 
   /v1/tasks/{task_id}:
     get:
@@ -752,7 +958,19 @@ paths:
   /v1/tasks/{task_id}/cancel:
     post:
       tags: [tasks]
-      summary: Cancel a running task
+      summary: Cancel a pending or running task
+      description: |
+        Cancellation is delivered through the same job claim path as work:
+
+        - `pending` tasks are marked `canceled` immediately and removed from
+          the claim queue.
+        - `running` tasks receive a `cancel` job on the next Worker claim.
+          The task remains `running` until the Worker reports a terminal
+          result (typically `canceled`).
+        - Terminal tasks return the current task unchanged (idempotent).
+
+        Enqueuing a cancel job for a running task requires the Worker to be
+        online. The Master may send a best-effort SSE `wake` event.
       operationId: cancelTask
       security:
         - bearerAuth: []
@@ -774,8 +992,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         "404":
           $ref: '#/components/responses/NotFound'
-        "503":
-          $ref: '#/components/responses/WorkerUnavailable'
 
   /v1/admin/users:
     get:
@@ -880,6 +1096,26 @@ paths:
           $ref: '#/components/responses/UserNotFound'
         "409":
           $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [admin]
+      summary: Permanently deprovision a user
+      operationId: adminDeleteUser
+      description: |
+        Soft-deletes the account, revokes its credentials and registrations,
+        revokes its Workers, and disconnects all active sessions. The operation
+        is irreversible and preserves identifiers for referential integrity.
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      responses:
+        "204":
+          description: User deprovisioned.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/UserNotFound'
 
   /v1/admin/users/{username}/tokens:
     get:
@@ -1062,8 +1298,21 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/ShortId'
+    InvitationId:
+      name: invitation_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ShortId'
     Username:
       name: username
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    PluginId:
+      name: plugin_id
       in: path
       required: true
       schema:
@@ -1140,12 +1389,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-    WorkerUnavailable:
-      description: Worker is offline, disconnected, or unable to accept the event.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
     TaskRequestRejected:
       description: Request validation failed or the target Worker is offline.
       content:
@@ -1206,12 +1449,12 @@ components:
       properties:
         product:
           type: string
-          examples: [capown-master]
+          const: capown-master
         version:
           type: string
         protocol_version:
           type: string
-          const: "1.1"
+          const: "1.6"
         initialized:
           type: boolean
         capabilities:
@@ -1229,7 +1472,22 @@ components:
           minLength: 1
         password:
           type: string
-          minLength: 8
+          minLength: 6
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 6
+        invitation_code:
+          type: string
+          description: Required after the first administrator initializes the Master.
 
     LoginResponse:
       type: object
@@ -1256,7 +1514,56 @@ components:
           type: string
         new_password:
           type: string
-          minLength: 8
+          minLength: 6
+
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          maxLength: 120
+          default: ""
+
+    Invitation:
+      type: object
+      additionalProperties: false
+      required: [invitation_id, code_prefix, label, created_by, created_at, expires_at, status]
+      properties:
+        invitation_id:
+          $ref: '#/components/schemas/ShortId'
+        code_prefix:
+          type: string
+        label:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/ShortId'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+        used_at:
+          type: [string, 'null']
+          format: date-time
+        used_by:
+          type: [string, 'null']
+        revoked_at:
+          type: [string, 'null']
+          format: date-time
+        status:
+          type: string
+          enum: [active, used, expired, revoked]
+
+    CreatedInvitation:
+      allOf:
+        - $ref: '#/components/schemas/Invitation'
+        - type: object
+          additionalProperties: false
+          required: [invitation_code]
+          properties:
+            invitation_code:
+              type: string
+              description: Plaintext one-time code. Treat as a secret.
 
     User:
       type: object
@@ -1272,7 +1579,7 @@ components:
           enum: [user, admin]
         status:
           type: string
-          enum: [active, disabled]
+          enum: [active, disabled, deleted]
         created_at:
           $ref: '#/components/schemas/Timestamp'
         disabled_at:
@@ -1540,7 +1847,7 @@ components:
     WorkerRuntimeUpdateRequest:
       type: object
       additionalProperties: false
-      required: [hostname, os, mode, capabilities, workspace]
+      required: [hostname, os, mode, capabilities, workspace, plugins]
       properties:
         hostname:
           type: string
@@ -1559,17 +1866,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PluginInfo'
-          description: Plugin snapshot reported by the Worker. Omitted when no plugins are configured.
+          description: Plugin snapshot reported by the Worker. Empty when no plugins are configured.
 
     Worker:
       type: object
       additionalProperties: false
-      required: [worker_id, worker_name, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at]
+      required: [worker_id, worker_name, owner_user_id, owner_username, hostname, os, mode, capabilities, workspace, status, last_heartbeat, registered_at, previous_worker_name, renamed_at, plugins]
       properties:
         worker_id:
           $ref: '#/components/schemas/WorkerId'
         worker_name:
           $ref: '#/components/schemas/WorkerName'
+        owner_user_id:
+          $ref: '#/components/schemas/ShortId'
+        owner_username:
+          type: string
+          minLength: 1
         hostname:
           type: string
         os:
@@ -1632,7 +1944,7 @@ components:
           minLength: 1
         password:
           type: string
-          minLength: 8
+          minLength: 6
         role:
           type: string
           enum: [user, admin]
@@ -1646,13 +1958,21 @@ components:
           type: string
         password:
           type: string
-          minLength: 8
+          minLength: 6
         role:
           type: string
           enum: [user, admin]
         status:
           type: string
           enum: [active, disabled]
+
+    SetPluginEnabledRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
 
     AdminTokenView:
       type: object
@@ -1688,11 +2008,58 @@ components:
         event:
           type: string
           description: |
-            SSE event field. Worker streams use `task` events for task
-            dispatch. Dashboard streams use events defined in
+            SSE event field. Worker streams may emit `wake` when jobs are
+            available. Dashboard streams use events defined in
             DashboardSSEEnvelope.
         data:
           description: JSON value carried in the SSE data field.
+
+    WorkerWakeData:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [jobs_available]
+          description: Why the Worker should claim jobs now.
+
+    JobType:
+      type: string
+      enum: [task, cancel]
+
+    WorkerJob:
+      type: object
+      additionalProperties: false
+      required: [job_type, delivery_id, task_id]
+      properties:
+        job_type:
+          $ref: '#/components/schemas/JobType'
+        delivery_id:
+          $ref: '#/components/schemas/DeliveryId'
+        task_id:
+          $ref: '#/components/schemas/TaskId'
+        task_type:
+          type: string
+          description: Present when `job_type` is `task`.
+        params:
+          type: object
+          description: Present when `job_type` is `task`.
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          description: Present when `job_type` is `task`.
+
+    WorkerJobsResponse:
+      type: object
+      additionalProperties: false
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkerJob'
 
     DashboardSSEEnvelope:
       allOf:
@@ -1720,7 +2087,7 @@ components:
     PluginInfo:
       type: object
       additionalProperties: false
-      required: [plugin_id, version, kind, transport, status, tools, error]
+      required: [plugin_id, version, kind, transport, enabled, status, tools, error]
       properties:
         plugin_id:
           type: string
@@ -1733,6 +2100,9 @@ components:
         transport:
           type: string
           description: Plugin transport, e.g. `stdio`.
+        enabled:
+          type: boolean
+          description: Persistent desired state from the Worker plugin manifest.
         status:
           type: string
           enum: [starting, running, stopped, error, disabled]
@@ -1747,6 +2117,11 @@ components:
     TaskId:
       type: string
       pattern: '^tsk_[0-9a-f]{24}$'
+
+    DeliveryId:
+      type: string
+      pattern: '^job_[0-9a-f]{24}$'
+      description: Opaque identifier for one leased delivery attempt.
 
     TaskStatus:
       type: string
@@ -1766,7 +2141,7 @@ components:
           properties:
             task_type:
               type: string
-              description: Currently only `plugin_call` is supported.
+              const: plugin_call
             params:
               type: object
         timeout_seconds:
@@ -1811,10 +2186,12 @@ components:
     TaskResult:
       type: object
       additionalProperties: false
-      required: [task_id, worker_id, status]
+      required: [task_id, delivery_id, worker_id, status]
       properties:
         task_id:
           $ref: '#/components/schemas/TaskId'
+        delivery_id:
+          $ref: '#/components/schemas/DeliveryId'
         worker_id:
           $ref: '#/components/schemas/WorkerId'
         status:

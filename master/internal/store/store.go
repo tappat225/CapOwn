@@ -97,6 +97,21 @@ func (s *Store) initDB() error {
 		`CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)`,
 
+		`CREATE TABLE IF NOT EXISTS user_invitations (
+			invitation_id TEXT PRIMARY KEY,
+			code_hash     TEXT NOT NULL UNIQUE,
+			code_prefix   TEXT NOT NULL,
+			label         TEXT NOT NULL DEFAULT '',
+			created_by    TEXT NOT NULL REFERENCES users(user_id),
+			created_at    TEXT NOT NULL,
+			expires_at    TEXT NOT NULL,
+			used_at       TEXT,
+			used_by       TEXT REFERENCES users(user_id),
+			revoked_at    TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_invitations_created_by ON user_invitations(created_by)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_invitations_expires_at ON user_invitations(expires_at)`,
+
 		`CREATE TABLE IF NOT EXISTS registration_tokens (
 			token_id     TEXT PRIMARY KEY,
 			token_hash   TEXT NOT NULL UNIQUE,

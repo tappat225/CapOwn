@@ -2,9 +2,9 @@
 
 Next-generation Master server for CapOwn, written in Go.
 
-The wire contract is defined centrally in
+The current `/v1` wire contract is defined centrally in
 [`../protocol/openapi.yaml`](../protocol/openapi.yaml). Master endpoints must
-remain compatible with that specification.
+implement that specification.
 
 ## Architecture
 
@@ -14,7 +14,8 @@ remain compatible with that specification.
 [Worker (TypeScript)] -- Ed25519 -+         |
                                             |--- ChallengeStore (in-memory)
                                             |--- SessionStore  (in-memory)
-                                            |--- WorkerBroker  (SSE channels)
+                                            |--- WorkerBroker  (optional wake SSE)
+                                            |--- TaskStore     (job claim queues)
                                             |--- DashboardBus  (user events)
 ```
 
@@ -128,7 +129,10 @@ curl -X POST http://localhost:9210/v1/auth/register \
   -d '{"username": "admin", "password": "my-secure-password"}'
 ```
 
-The first user is created as an admin. Registration closes immediately afterward.
+The first user is created as an admin without an invitation. After
+initialization, administrators issue one-time invitations for normal user
+registration. Invitation plaintext is returned once and only its hash is
+stored by the Master.
 
 ## API
 
@@ -139,7 +143,7 @@ GET /v1/meta
 
 ### Authentication (Web Sessions)
 ```
-POST /v1/auth/register    -- first user (admin) registration
+POST /v1/auth/register    -- first admin or invited normal-user registration
 POST /v1/auth/login       -- username + password -> cown_web_* session
 POST /v1/auth/logout      -- revoke session
 GET  /v1/me               -- current user info
@@ -166,6 +170,8 @@ GET    /v1/workers              -- list your workers
 GET    /v1/workers/{id}         -- get worker info
 PATCH  /v1/workers/{id}         -- rename worker
 DELETE /v1/workers/{id}         -- revoke worker
+GET    /v1/workers/{id}/plugins -- list reported plugins
+PATCH  /v1/workers/{id}/plugins/{plugin_id} -- enable or disable a plugin
 ```
 
 ### Worker API (TypeScript Worker)
@@ -175,6 +181,15 @@ POST /v1/workers/auth/challenges           -- request Ed25519 nonce
 POST /v1/workers/auth/sessions             -- verify signed nonce
 PUT  /v1/workers/{id}/runtime              -- report runtime metadata
 GET  /v1/workers/{id}/events               -- SSE stream
+POST /v1/workers/{id}/jobs/claim            -- long-poll and claim jobs
+```
+
+### Tasks
+```
+POST /v1/tasks                              -- enqueue a task
+GET  /v1/tasks/{task_id}                    -- get task status/result
+PUT  /v1/tasks/{task_id}/result             -- report a task result
+POST /v1/tasks/{task_id}/cancel             -- cancel a task
 ```
 
 ### Dashboard Events
@@ -188,12 +203,16 @@ GET    /v1/admin/users                                     -- list users
 POST   /v1/admin/users                                     -- create user
 GET    /v1/admin/users/{username}                           -- get user
 PATCH  /v1/admin/users/{username}                           -- update user
+DELETE /v1/admin/users/{username}                           -- permanently deprovision user
 GET    /v1/admin/users/{username}/tokens                    -- list user tokens
 POST   /v1/admin/users/{username}/tokens                    -- create user token
 DELETE /v1/admin/tokens/{id}                                -- revoke any token
 GET    /v1/admin/users/{username}/worker-registrations      -- list registrations
 POST   /v1/admin/users/{username}/worker-registrations      -- create registration
 DELETE /v1/admin/worker-registrations/{id}                   -- revoke registration
+GET    /v1/admin/invitations                                -- list user invitations
+POST   /v1/admin/invitations                                -- create one-time invitation
+DELETE /v1/admin/invitations/{id}                           -- revoke invitation
 ```
 
 ## Configuration
@@ -246,7 +265,12 @@ configuration and database state survive container recreation.
 - **Single SQLite database**: Unifies Python Master's split registry.db and users.db
 - **In-memory challenge/session stores**: Nonces and worker sessions are ephemeral; Master restart requires workers to re-authenticate (matching Python behavior)
 - **Go 1.22+ ServeMux**: Uses `"GET /path/{param}"` syntax -- no third-party router
-- **Channel-based SSE**: Each SSE connection gets a Go channel; broker maps worker_id to channels
+- **Claim-based jobs**: Workers claim tasks and cancellation jobs through a
+  long-poll endpoint; short delivery leases requeue interrupted claims, and a
+  task becomes running only after Worker confirmation with the current opaque
+  delivery ID. Task payloads are never delivered by SSE.
+- **Optional wake SSE**: The Worker SSE channel only carries best-effort wake
+  events and heartbeats.
 - **Ed25519 via crypto/ed25519**: Pure Go implementation matching Node.js `crypto.sign()`
 - **PBKDF2-HMAC-SHA256**: 600,000 iterations, hex salt -- Python-compatible password hashing
 - **Registration links**: When `CAPOWN_MASTER_PUBLIC_URL` is configured, the Master returns full registration URLs for the Worker CLI

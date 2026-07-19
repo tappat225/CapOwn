@@ -2,8 +2,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateManifest } from "../src/plugins/manifest.js";
 import { McpStdioAdapter } from "../src/plugins/mcp-stdio.js";
+import { PluginManager } from "../src/plugins/manager.js";
 import { PluginErrorCodes } from "../src/plugins/errors.js";
 import type { PluginManifest } from "../src/plugins/types.js";
 
@@ -43,6 +47,25 @@ describe("plugin manifests", () => {
       ...baseManifest(),
       limits: { ...baseManifest().limits, unexpected: 1 },
     } as unknown as Record<string, unknown>));
+  });
+
+  it("persists remote disable state and reports it in snapshots", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "capown-plugin-"));
+    const pluginsDir = join(configDir, "plugins.d");
+    await mkdir(pluginsDir);
+    const manifestPath = join(pluginsDir, "test.json");
+    await writeFile(manifestPath, JSON.stringify(baseManifest(), null, 2));
+    try {
+      const manager = new PluginManager(configDir);
+      await manager.loadPlugins();
+      const snapshot = await manager.setPluginEnabled("test-plugin", false);
+      assert.equal(snapshot.enabled, false);
+      assert.equal(snapshot.status, "disabled");
+      const persisted = JSON.parse(await readFile(manifestPath, "utf-8")) as { enabled: boolean };
+      assert.equal(persisted.enabled, false);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
   });
 });
 

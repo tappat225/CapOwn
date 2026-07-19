@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="node" />
-/** Streaming SSE parser + reconnecting client for CapOwn Master events.
+/** Streaming SSE parser and single-connection client for CapOwn Master events.
 
 Handles:
 - CRLF and LF line endings

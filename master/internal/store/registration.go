@@ -159,6 +159,17 @@ func (s *Store) RevokeRegistrationToken(tokenID string) error {
 	return nil
 }
 
+// RevokeAllUserRegistrationTokens revokes every active registration token for a user.
+func (s *Store) RevokeAllUserRegistrationTokens(userID string) (int, error) {
+	now := NowISO()
+	res, err := s.db.Exec(`UPDATE registration_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // CleanExpiredRegistrationTokens deletes expired registration tokens.
 func (s *Store) CleanExpiredRegistrationTokens() (int, error) {
 	now := NowISO()

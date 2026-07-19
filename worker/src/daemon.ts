@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Worker Next daemon: main loop -- auth, runtime report, SSE, reconnect, tasks. */
+/** Worker Next daemon: main loop -- auth, runtime report, job claim, optional SSE wake. */
 
 import { log } from "./logging.js";
 import { loadConfig, type WorkerNextConfig } from "./config.js";
@@ -12,13 +12,15 @@ import { SSEClient } from "./sse.js";
 import { getPlatformInfo } from "./platform.js";
 import { PluginManager } from "./plugins/manager.js";
 import { PluginError, PluginErrorCodes } from "./plugins/errors.js";
-import type { TaskEvent, PluginCallParams, TaskResultReport } from "./protocol.js";
+import type { WorkerJob, PluginCallParams, PluginSetEnabledParams, TaskResultReport } from "./protocol.js";
 
 // Backoff limits for reconnection
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 const BACKOFF_JITTER = 0.25;
-const STABLE_PING_COUNT = 4;
+const STABLE_CLAIM_COUNT = 4;
+const CLAIM_LIMIT = 1;
+const CLAIM_WAIT_SECONDS = 25;
 
 export interface DaemonOptions {
   configPath?: string;
@@ -34,6 +36,8 @@ export class Daemon {
   private _pluginManager!: PluginManager;
   private _activeTasks = new Map<string, AbortController>();
   private _unsubscribePluginSnapshots?: () => void;
+  private _claimAbort: AbortController | null = null;
+  private _wakePending = false;
 
   constructor(private readonly _opts: DaemonOptions) {}
 
@@ -68,6 +72,10 @@ export class Daemon {
   stop(): void {
     if (this._running) {
       this._running = false;
+      this._claimAbort?.abort();
+      for (const active of this._activeTasks.values()) {
+        active.abort();
+      }
       this._abort.abort();
     }
   }
@@ -87,7 +95,6 @@ export class Daemon {
       this._config.identityPath,
     );
 
-    // Load or generate identity
     this._identity = loadOrGenerateIdentity(this._config.identityPath);
 
     log.info(
@@ -96,7 +103,6 @@ export class Daemon {
       this._identity.workerName || "<none>",
     );
 
-    // Daemon requires an existing registration (worker_id in identity)
     if (!this._identity.workerId) {
       throw new Error(
         "daemon: no worker_id found in identity. " +
@@ -104,7 +110,6 @@ export class Daemon {
       );
     }
 
-    // Create master client
     this._client = new MasterClient({
       masterUrl: this._config.master_url,
     });
@@ -117,7 +122,6 @@ export class Daemon {
       platform.arch,
     );
 
-    // Initialize plugin manager (config dir = parent of config file)
     const { dirname } = await import("node:path");
     const configDir = dirname(this._config.configPath);
     this._pluginManager = new PluginManager(configDir);
@@ -128,7 +132,6 @@ export class Daemon {
       this._pluginManager.getPluginSnapshots().length,
     );
 
-    // Re-report runtime when plugin status changes
     this._unsubscribePluginSnapshots = this._pluginManager.onSnapshotsChanged(() => {
       if (!this._abort.signal.aborted && this._client.sessionToken && this._identity.workerId) {
         const snapshots = this._pluginManager.getPluginSnapshots();
@@ -143,10 +146,9 @@ export class Daemon {
 
   private async _mainLoop(): Promise<void> {
     let backoff = BACKOFF_BASE_MS;
-    let consecutivePings = 0;
+    let consecutiveClaims = 0;
 
     while (this._running) {
-      // Step 1: Authenticate with challenge-response
       if (!this._client.sessionToken) {
         const ok = await this._authenticate();
         if (!ok) {
@@ -159,7 +161,6 @@ export class Daemon {
         }
       }
 
-      // Step 2: Report runtime metadata (with plugins)
       const pluginSnapshots = this._pluginManager.getPluginSnapshots();
       if (!(await this._client.reportRuntime(this._identity.workerId, pluginSnapshots))) {
         if (!this._client.sessionToken) continue;
@@ -171,53 +172,50 @@ export class Daemon {
         continue;
       }
 
-      // Step 3: Connect SSE stream
-      log.info("daemon: connecting SSE stream...");
-
+      // Optional SSE wake accelerator runs alongside the claim loop.
+      const stopWake = this._startWakeStream();
       try {
-        const sseClient = new SSEClient({
-          masterUrl: this._config.master_url,
-          workerId: this._identity.workerId,
-          getSessionToken: () => this._client.sessionToken,
-          onSessionExpired: () => {
-            log.warn("daemon: SSE session expired, clearing session");
-            this._client.sessionToken = "";
-          },
-          onHeartbeat: () => {
-            consecutivePings++;
-            if (consecutivePings >= STABLE_PING_COUNT) {
-              backoff = BACKOFF_BASE_MS;
-              consecutivePings = 0;
-            }
-          },
-          onEvent: (event, data) => {
-            if (event === "task") {
-              let taskEvent: TaskEvent;
-              try {
-                taskEvent = JSON.parse(data) as TaskEvent;
-              } catch {
-                log.error("daemon: failed to parse task event JSON");
-                return;
-              }
-              if (!this._isValidTaskEvent(taskEvent)) {
-                log.error("daemon: task event missing required fields");
-                return;
-              }
-              this._handleTaskEvent(taskEvent).catch((err) => {
-                log.error("daemon: task handler error: %s", err);
-              });
-            }
-          },
-          signal: this._abort.signal,
-        });
+        log.info("daemon: starting job claim loop...");
+        while (this._running && this._client.sessionToken) {
+          const waitSeconds = this._wakePending ? 0 : CLAIM_WAIT_SECONDS;
+          this._wakePending = false;
+          this._claimAbort = new AbortController();
+          const linked = this._linkAbort(this._claimAbort, this._abort.signal);
 
-        await sseClient.connect();
-      } catch (err) {
-        if (!this._running) break;
-        log.error("daemon: SSE connection lost: %s", err);
+          const response = await this._client.claimJobs(this._identity.workerId, {
+            limit: CLAIM_LIMIT,
+            waitSeconds,
+            signal: this._claimAbort.signal,
+          });
+          linked.dispose();
+          this._claimAbort = null;
+
+          if (!this._running) break;
+          if (!response) {
+            if (!this._client.sessionToken) break;
+            // Long-poll may be aborted by an SSE wake so the Worker can claim sooner.
+            if (this._wakePending) continue;
+            log.warn("daemon: job claim failed, will retry with backoff");
+            break;
+          }
+
+          consecutiveClaims++;
+          if (consecutiveClaims >= STABLE_CLAIM_COUNT) {
+            backoff = BACKOFF_BASE_MS;
+            consecutiveClaims = 0;
+          }
+
+          for (const job of response.jobs) {
+            this._handleJob(job).catch((err) => {
+              log.error("daemon: job handler error: %s", err);
+            });
+          }
+        }
+      } finally {
+        stopWake();
       }
 
-      consecutivePings = 0;
+      consecutiveClaims = 0;
 
       if (this._running) {
         const delay = Math.min(backoff, BACKOFF_MAX_MS);
@@ -229,6 +227,66 @@ export class Daemon {
         );
       }
     }
+  }
+
+  private _startWakeStream(): () => void {
+    const wakeAbort = new AbortController();
+    const linked = this._linkAbort(wakeAbort, this._abort.signal);
+
+    const run = async (): Promise<void> => {
+      let reconnectDelay = BACKOFF_BASE_MS;
+
+      while (this._running && this._client.sessionToken && !wakeAbort.signal.aborted) {
+        let stable = false;
+        try {
+          const sseClient = new SSEClient({
+            masterUrl: this._config.master_url,
+            workerId: this._identity.workerId,
+            getSessionToken: () => this._client.sessionToken,
+            onSessionExpired: () => {
+              log.warn("daemon: SSE session expired, clearing session");
+              this._client.sessionToken = "";
+            },
+            onHeartbeat: () => {
+              stable = true;
+            },
+            onEvent: (event) => {
+              if (event === "wake") {
+                this._wakePending = true;
+              }
+            },
+            signal: wakeAbort.signal,
+          });
+          await sseClient.connect();
+        } catch (err) {
+          if (this._running && this._client.sessionToken && !wakeAbort.signal.aborted) {
+            log.warn("daemon: optional SSE wake stream closed: %s", err);
+          }
+        }
+
+        if (!this._running || !this._client.sessionToken || wakeAbort.signal.aborted) {
+          break;
+        }
+
+        if (stable) {
+          reconnectDelay = BACKOFF_BASE_MS;
+        } else {
+          reconnectDelay = Math.min(
+            Math.floor(reconnectDelay * (1.5 + Math.random() * BACKOFF_JITTER * 2 - BACKOFF_JITTER)),
+            BACKOFF_MAX_MS,
+          );
+        }
+        if (!(await this._sleepWithSignal(reconnectDelay, wakeAbort.signal))) {
+          break;
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      wakeAbort.abort();
+      linked.dispose();
+    };
   }
 
   // ------------------------------------------------------------------
@@ -244,30 +302,123 @@ export class Daemon {
   }
 
   // ------------------------------------------------------------------
-  // Task handling
+  // Job handling
   // ------------------------------------------------------------------
 
-  private async _handleTaskEvent(event: TaskEvent): Promise<void> {
-    if (event.task_type === "plugin_call") {
-      await this._handlePluginCall(event.task_id, event.params as unknown as PluginCallParams, event.timeout_seconds);
-    } else if (event.task_type === "task_cancel") {
-      const targetTaskId = (event.params as Record<string, string>).task_id;
-      log.info("daemon: cancel requested for task %s", targetTaskId);
-      const abort = this._activeTasks.get(targetTaskId);
+  private async _handleJob(job: WorkerJob): Promise<void> {
+    if (!this._isValidJob(job)) {
+      log.error("daemon: claimed job missing required fields");
+      return;
+    }
+
+    if (job.job_type === "cancel") {
+      log.info("daemon: cancel job for task %s", job.task_id);
+      const abort = this._activeTasks.get(job.task_id);
       if (abort) {
         abort.abort();
       }
-    } else {
-      log.warn("daemon: unknown task type %s", event.task_type);
-      await this._reportTaskResult(event.task_id, {
-        task_id: event.task_id,
+      return;
+    }
+
+    if (job.job_type === "task") {
+      if (job.task_type === "plugin_call") {
+        if (this._activeTasks.has(job.task_id)) {
+          log.warn("daemon: duplicate delivery ignored for active task %s", job.task_id);
+          return;
+        }
+        const startedAt = new Date().toISOString();
+        const taskAbort = new AbortController();
+        this._activeTasks.set(job.task_id, taskAbort);
+        try {
+          const accepted = await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "running",
+            started_at: startedAt,
+            truncated: false,
+          });
+          if (!accepted) return;
+          await this._handlePluginCall(
+            job.task_id,
+            job.params as unknown as PluginCallParams,
+            job.timeout_seconds as number,
+            taskAbort,
+            startedAt,
+            job.delivery_id,
+          );
+        } finally {
+          this._activeTasks.delete(job.task_id);
+        }
+        return;
+      }
+      if (job.task_type === "plugin_set_enabled") {
+        const startedAt = new Date().toISOString();
+        const accepted = await this._reportTaskResult(job.task_id, {
+          task_id: job.task_id,
+          delivery_id: job.delivery_id,
+          worker_id: this._identity.workerId,
+          status: "running",
+          started_at: startedAt,
+          truncated: false,
+        });
+        if (!accepted) return;
+        const params = job.params as unknown as PluginSetEnabledParams;
+        try {
+          if (typeof params.plugin_id !== "string" || typeof params.enabled !== "boolean") {
+            throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin state parameters are invalid");
+          }
+          const plugin = await this._pluginManager.setPluginEnabled(params.plugin_id, params.enabled);
+          await this._client.reportRuntime(this._identity.workerId, this._pluginManager.getPluginSnapshots());
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "completed",
+            result: { is_error: false, content: [], structured_content: plugin },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        } catch (error) {
+          const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
+          const message = error instanceof PluginError ? error.safeMessage : "failed to update plugin state";
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "failed",
+            error: { code, message, details: null },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        }
+        return;
+      }
+      log.warn("daemon: unknown task type %s", job.task_type);
+      const startedAt = new Date().toISOString();
+      const accepted = await this._reportTaskResult(job.task_id, {
+        task_id: job.task_id,
+        delivery_id: job.delivery_id,
+        worker_id: this._identity.workerId,
+        status: "running",
+        started_at: startedAt,
+        truncated: false,
+      });
+      if (!accepted) return;
+      await this._reportTaskResult(job.task_id, {
+        task_id: job.task_id,
+        delivery_id: job.delivery_id,
         worker_id: this._identity.workerId,
         status: "failed",
         error: {
           code: "invalid_input",
-          message: `unsupported task type: ${event.task_type}`,
+          message: `unsupported task type: ${job.task_type}`,
           details: null,
         },
+		started_at: startedAt,
+		completed_at: new Date().toISOString(),
         truncated: false,
       });
     }
@@ -277,12 +428,15 @@ export class Daemon {
     taskId: string,
     params: PluginCallParams,
     timeoutSeconds: number,
+    taskAbort: AbortController,
+    startedAt: string,
+	deliveryId: string,
   ): Promise<void> {
-    const startedAt = new Date().toISOString();
-    const taskAbort = new AbortController();
-    this._activeTasks.set(taskId, taskAbort);
-
     try {
+      if (taskAbort.signal.aborted) {
+        await this._reportCanceled(taskId, deliveryId, startedAt);
+        return;
+      }
       const result = await this._pluginManager.invokePlugin(
         params.plugin_id,
         params.tool_name,
@@ -292,11 +446,13 @@ export class Daemon {
       );
 
       if (taskAbort.signal.aborted) {
+        await this._reportCanceled(taskId, deliveryId, startedAt);
         return;
       }
 
       await this._reportTaskResult(taskId, {
         task_id: taskId,
+        delivery_id: deliveryId,
         worker_id: this._identity.workerId,
         status: "completed",
         result,
@@ -306,6 +462,7 @@ export class Daemon {
       });
     } catch (err) {
       if (taskAbort.signal.aborted) {
+        await this._reportCanceled(taskId, deliveryId, startedAt);
         return;
       }
       const errorCode = err instanceof PluginError ? err.code : PluginErrorCodes.PluginProtocolError;
@@ -313,6 +470,7 @@ export class Daemon {
 
       await this._reportTaskResult(taskId, {
         task_id: taskId,
+        delivery_id: deliveryId,
         worker_id: this._identity.workerId,
         status: err instanceof PluginError && err.code === PluginErrorCodes.PluginTimeout ? "timeout" : "failed",
         error: { code: errorCode, message, details: null },
@@ -320,34 +478,107 @@ export class Daemon {
         completed_at: new Date().toISOString(),
         truncated: false,
       });
-    } finally {
-      this._activeTasks.delete(taskId);
     }
   }
 
-  private _isValidTaskEvent(value: unknown): value is TaskEvent {
+  private async _reportCanceled(
+    taskId: string,
+    deliveryId: string,
+    startedAt: string,
+  ): Promise<boolean> {
+    return this._reportTaskResult(taskId, {
+      task_id: taskId,
+      delivery_id: deliveryId,
+      worker_id: this._identity.workerId,
+      status: "canceled",
+      error: {
+        code: PluginErrorCodes.PluginCanceled,
+        message: "task canceled",
+        details: null,
+      },
+      started_at: startedAt,
+      completed_at: new Date().toISOString(),
+      truncated: false,
+    });
+  }
+
+  private _isValidJob(value: unknown): value is WorkerJob {
     if (!value || typeof value !== "object") return false;
-    const event = value as Record<string, unknown>;
-    return typeof event.task_id === "string" && /^tsk_[0-9a-f]{24}$/.test(event.task_id)
-      && typeof event.task_type === "string" && event.task_type.length > 0
-      && !!event.params && typeof event.params === "object" && !Array.isArray(event.params)
-      && typeof event.timeout_seconds === "number"
-      && Number.isInteger(event.timeout_seconds)
-      && event.timeout_seconds >= 1 && event.timeout_seconds <= 3600;
+    const job = value as Record<string, unknown>;
+    if (typeof job.task_id !== "string" || !/^tsk_[0-9a-f]{24}$/.test(job.task_id)) {
+      return false;
+    }
+    if (typeof job.delivery_id !== "string" || !/^job_[0-9a-f]{24}$/.test(job.delivery_id)) {
+      return false;
+    }
+    if (job.job_type === "cancel") {
+      return true;
+    }
+    if (job.job_type !== "task") {
+      return false;
+    }
+    return typeof job.task_type === "string" && job.task_type.length > 0
+      && !!job.params && typeof job.params === "object" && !Array.isArray(job.params)
+      && typeof job.timeout_seconds === "number"
+      && Number.isInteger(job.timeout_seconds)
+      && job.timeout_seconds >= 1 && job.timeout_seconds <= 3600;
   }
 
-  private async _reportTaskResult(taskId: string, report: TaskResultReport): Promise<void> {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (await this._client.reportTaskResult(taskId, report)) return;
-      if (!this._client.sessionToken || attempt === 3) break;
-      await this._sleep(250 * attempt);
+  private async _reportTaskResult(taskId: string, report: TaskResultReport): Promise<boolean> {
+    let attempt = 0;
+    while (this._running && !this._abort.signal.aborted) {
+      if (!this._client.sessionToken) {
+        await this._sleep(250);
+        continue;
+      }
+      const outcome = await this._client.reportTaskResultOutcome(taskId, report);
+      if (outcome === "ok") return true;
+      if (outcome === "rejected") {
+        log.error("daemon: master rejected result for task %s", taskId);
+        return false;
+      }
+      attempt++;
+      const delay = Math.min(250 * attempt, 5_000);
+      await this._sleep(delay);
     }
-    log.error("daemon: failed to report result for task %s", taskId);
+    return false;
   }
 
   // ------------------------------------------------------------------
   // Helpers
   // ------------------------------------------------------------------
+
+  private _linkAbort(child: AbortController, parent: AbortSignal): { dispose: () => void } {
+    if (parent.aborted) {
+      child.abort();
+      return { dispose: () => {} };
+    }
+    const onAbort = (): void => child.abort();
+    parent.addEventListener("abort", onAbort, { once: true });
+    return {
+      dispose: () => parent.removeEventListener("abort", onAbort),
+    };
+  }
+
+  private _sleepWithSignal(ms: number, signal: AbortSignal): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: NodeJS.Timeout;
+      const finish = (completed: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        this._abort.signal.removeEventListener("abort", onAbort);
+        resolve(completed);
+      };
+      const onAbort = (): void => finish(false);
+      timer = setTimeout(() => finish(true), ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+      this._abort.signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted || this._abort.signal.aborted) finish(false);
+    });
+  }
 
   private _sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {

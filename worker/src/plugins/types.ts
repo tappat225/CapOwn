@@ -50,6 +50,7 @@ export interface PluginInfo {
   version: string;
   kind: string;
   transport: string;
+  enabled: boolean;
   status: PluginStatus;
   tools: PluginToolInfo[];
   error: string;
@@ -96,24 +97,7 @@ export interface McpCallToolResult {
 }
 
 // --------------------------------------------------------------------------
-// Task types received over SSE
-// --------------------------------------------------------------------------
-
-export interface TaskEvent {
-  task_id: string;
-  task_type: string;
-  params: Record<string, unknown>;
-  timeout_seconds: number;
-}
-
-export interface PluginCallParams {
-  plugin_id: string;
-  tool_name: string;
-  arguments: Record<string, unknown>;
-}
-
-// --------------------------------------------------------------------------
-// Result content blocks (protocol v1.2)
+// Result content blocks (protocol v1.5)
 // --------------------------------------------------------------------------
 
 export interface ContentBlock {
