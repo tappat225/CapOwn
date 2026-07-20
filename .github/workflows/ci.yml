@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protocol:
+    name: Protocol and version checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.x
+
+      - name: Check version metadata
+        run: node scripts/version.mjs check
+
+      - name: Validate OpenAPI contract
+        run: npx --yes swagger-cli validate protocol/openapi.yaml
+
+  master:
+    name: Master Go checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: master
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: master/go.mod
+          cache-dependency-path: master/go.sum
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            printf '%s\n' "$files"
+            exit 1
+          fi
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Build Master
+        run: go build -o "$RUNNER_TEMP/capown-master" ./cmd/capown-master
+
+  worker:
+    name: Worker TypeScript checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.x
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck Worker
+        run: npm run typecheck
+
+      - name: Run Worker tests
+        run: npm test
+
+      - name: Validate npm package contents
+        run: npm pack --dry-run
+
+  python:
+    name: Python syntax checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Compile Python sources
+        run: python -m compileall -q client tests/e2e
+
+  scripts:
+    name: Shell and PowerShell checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y shellcheck
+
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
+          $issues = @(Invoke-ScriptAnalyzer -Path scripts -Recurse -Severity Error)
+          if ($issues.Count -gt 0) {
+            $issues | Format-Table -AutoSize
+            exit 1
+          }
