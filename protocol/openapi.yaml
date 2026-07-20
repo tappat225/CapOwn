@@ -32,7 +32,7 @@ info:
     - invitation_invalid
 
 servers:
-  - url: http://localhost:9210
+  - url: http://localhost:9230
     description: Local development Master
 
 tags:

@@ -44,7 +44,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Master: Section{
 			Host:                    "0.0.0.0",
-			Port:                    9210,
+			Port:                    9230,
 			DBPath:                  "./data/master.db",
 			PublicURL:               "",
 			HeartbeatTimeout:        60,
@@ -122,7 +122,7 @@ func Load(path string) *Config {
 		cfg.Master.HeartbeatTimeout = 2
 	}
 	if cfg.Master.Port <= 0 || cfg.Master.Port > 65535 {
-		cfg.Master.Port = 9210
+		cfg.Master.Port = 9230
 	}
 	if cfg.Master.MaxBodyBytes < 1024 {
 		cfg.Master.MaxBodyBytes = 1024

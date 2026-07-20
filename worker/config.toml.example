@@ -3,7 +3,7 @@
 # Copy to ~/.capown/worker/config.toml or set CAPOWN_WORKER_NEXT_CONFIG.
 
 role = "worker"
-master_url = "https://master.example.com:9210"
+master_url = "https://master.example.com:9230"
 
 # Legacy [worker] section keys that are NOT used by Worker Next
 # (execution_mode, container_name, workspace, etc.) are silently ignored.

@@ -6,13 +6,13 @@ role = "master"
 [master]
 # Network
 host = "0.0.0.0"
-port = 9210
+port = 9230
 
 # Database
 db_path = "./data/master.db"
 
 # Public URL (for dashboard redirects, optional)
-public_url = "http://localhost:9210"
+public_url = "http://localhost:9230"
 
 # Heartbeat timeout in seconds (workers marked offline after this)
 heartbeat_timeout = 60

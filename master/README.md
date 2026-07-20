@@ -28,7 +28,7 @@ docker compose up -d --build
 ```
 
 The default host port is `9230`. Use `MASTER_PORT` to change only the host
-mapping; the Master still listens on port `9210` inside the container:
+mapping; the Master still listens on port `9230` inside the container:
 
 ```bash
 MASTER_PORT=9320 docker compose up -d --build
@@ -118,12 +118,12 @@ $env:CAPOWN_MASTER_DB_PATH = Join-Path $masterHome "data\master.db"
 go run ./cmd/capown-master
 ```
 
-The master listens on `0.0.0.0:9210` by default.
+The master listens on `0.0.0.0:9230` by default.
 
 ## First User Registration
 
 ```bash
-curl -X POST http://localhost:9210/v1/auth/register \
+curl -X POST http://localhost:9230/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "my-secure-password"}'
 ```
@@ -222,7 +222,7 @@ See `config.toml.example` for all options.
 |-------------|-------------|---------|
 | `CAPOWN_MASTER_CONFIG` | config file path | auto-detected |
 | `CAPOWN_MASTER_HOST` | host | `0.0.0.0` |
-| `CAPOWN_MASTER_PORT` | port | `9210` |
+| `CAPOWN_MASTER_PORT` | port | `9230` |
 | `CAPOWN_MASTER_DB_PATH` | db_path | `./data/master.db` |
 | `CAPOWN_MASTER_PUBLIC_URL` | public_url | `""` |
 | `CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS` | allowed_dashboard_origins | empty (uses config file; empty list is unrestricted) |

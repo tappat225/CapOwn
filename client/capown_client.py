@@ -16,7 +16,7 @@ from typing import Any
 
 @dataclass
 class ClientConfig:
-    master_url: str = "http://localhost:9210"
+    master_url: str = "http://localhost:9230"
     client_token: str = ""
     request_timeout: int = 30
 

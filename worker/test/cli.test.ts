@@ -31,11 +31,11 @@ describe("parseArgs", () => {
 describe("parseRegistrationLink", () => {
   it("parses a valid registration link", () => {
     const parsed = parseRegistrationLink(
-      `https://master.example.com:9210/v1/worker-registrations/${TOKEN}`,
+      `https://master.example.com:9230/v1/worker-registrations/${TOKEN}`,
     );
 
     assert.deepEqual(parsed, {
-      masterUrl: "https://master.example.com:9210",
+      masterUrl: "https://master.example.com:9230",
       registrationToken: TOKEN,
     });
   });

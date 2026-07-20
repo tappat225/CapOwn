@@ -14,12 +14,12 @@ import (
 
 	"github.com/capown/master/internal/domain"
 	"github.com/capown/master/internal/store"
+	"github.com/capown/master/internal/version"
 )
 
 const (
 	mcpProtocolVersion = "2025-03-26"
 	mcpServerName      = "capown"
-	mcpServerVersion   = "0.1.0"
 )
 
 type mcpJSONRPCRequest struct {
@@ -150,7 +150,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 			},
 			"serverInfo": map[string]string{
 				"name":    mcpServerName,
-				"version": mcpServerVersion,
+				"version": version.ProductVersion,
 			},
 			"instructions": "CapOwn next MCP server. Use plugin_call to invoke tools on owned Workers.",
 		}))

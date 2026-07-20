@@ -69,6 +69,17 @@ package registry is unavailable, still review the OpenAPI file and run the
 component tests; do not silently replace the canonical contract with an
 implementation-specific type file.
 
+### Versioning
+
+```bash
+node scripts/version.mjs sync-worker
+node scripts/version.mjs check
+```
+
+The repository-wide version source and release update rules are in
+[`VERSIONING.md`](./VERSIONING.md). `version.json` is the only committed
+version source; do not add component-specific manual version sources.
+
 ## Protocol-first rules
 
 - Treat `protocol/openapi.yaml` as the source of truth for routes, JSON fields,
@@ -114,7 +125,7 @@ implementation-specific type file.
   heartbeats, job claims, cancellation, and reconnect behavior.
 - Keep secrets out of source, tests, logs, fixtures, examples, and error text.
 - Use a plain Master origin in configuration, such as
-  `http://localhost:9210`; clients append `/v1` themselves.
+  `http://localhost:9230`; clients append `/v1` themselves.
 
 ## Ask first
 
@@ -202,6 +213,7 @@ modules must be ported deliberately rather than assumed to be available.
 - Protocol contract: `protocol/openapi.yaml`
 - Protocol governance: `protocol/README.md`
 - Protocol history: `protocol/CHANGELOG.md`
+- Version source and release rules: `VERSIONING.md` and `version.json`
 - Repository overview: `README.md`
 - Master architecture and routes: `master/README.md`
 - Worker milestone and usage: `worker/README.md`

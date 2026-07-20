@@ -30,7 +30,7 @@ docker compose up -d --build
 ```
 
 The default host port is `9230`. To choose another mapped host port, pass
-`MASTER_PORT`; the container continues to listen on `9210`:
+`MASTER_PORT`; the container continues to listen on `9230`:
 
 ```bash
 MASTER_PORT=9320 docker compose up -d --build

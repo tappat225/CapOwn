@@ -19,7 +19,7 @@ describe("Worker process control", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "worker-service-test-"));
     const configPath = path.join(directory, "config.toml");
     const identityPath = path.join(directory, "identity.toml");
-    fs.writeFileSync(configPath, 'master_url = "http://localhost:9210"\n');
+    fs.writeFileSync(configPath, 'master_url = "http://localhost:9230"\n');
     fs.writeFileSync(identityPath, 'worker_id = "wrk_service_test"\n');
     let stopRequested = false;
     const control = await startRuntimeControl({
@@ -50,7 +50,7 @@ describe("Worker process control", () => {
   it("cleans stale runtime state instead of trusting a reused PID", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "worker-service-stale-"));
     const configPath = path.join(directory, "config.toml");
-    fs.writeFileSync(configPath, 'master_url = "http://localhost:9210"\n');
+    fs.writeFileSync(configPath, 'master_url = "http://localhost:9230"\n');
     fs.writeFileSync(
       path.join(directory, "worker-runtime.json"),
       JSON.stringify({

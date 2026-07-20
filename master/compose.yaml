@@ -3,15 +3,18 @@ name: capown-master
 services:
   master:
     build:
-      context: .
-      dockerfile: Dockerfile
-    image: capown-master:next
+      context: ..
+      dockerfile: master/Dockerfile
+      args:
+        CAPOWN_PRODUCT_VERSION: "${CAPOWN_PRODUCT_VERSION:-}"
+        CAPOWN_PROTOCOL_VERSION: "${CAPOWN_PROTOCOL_VERSION:-}"
+    image: "capown-master:${CAPOWN_PRODUCT_VERSION:-next}"
     ports:
-      - "${MASTER_PORT:-9230}:9210"
+      - "${MASTER_PORT:-9230}:9230"
     environment:
       CAPOWN_MASTER_CONFIG: /data/config.toml
       CAPOWN_MASTER_HOST: "0.0.0.0"
-      CAPOWN_MASTER_PORT: "9210"
+      CAPOWN_MASTER_PORT: "9230"
       CAPOWN_MASTER_DB_PATH: /data/data/master.db
       CAPOWN_MASTER_PUBLIC_URL: "${CAPOWN_MASTER_PUBLIC_URL:-http://localhost:${MASTER_PORT:-9230}}"
       # Leave this empty by default so /data/config.toml remains authoritative.

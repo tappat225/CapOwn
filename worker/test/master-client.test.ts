@@ -64,7 +64,7 @@ function mockFetch(url: string, opts: RequestInit): Promise<Response> {
 // Tests
 // --------------------------------------------------------------------------
 
-const MASTER_URL = "http://mock-master:9210";
+const MASTER_URL = "http://mock-master:9230";
 
 describe("MasterClient", () => {
   before(() => {

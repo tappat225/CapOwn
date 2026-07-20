@@ -16,7 +16,7 @@ describe("config", () => {
       fs.writeFileSync(
         cfgPath,
         [
-          'master_url = "http://localhost:9210"',
+          'master_url = "http://localhost:9230"',
           'worker_name = "test-worker"',
           "",
           "[worker]",
@@ -26,7 +26,7 @@ describe("config", () => {
       );
 
       const cfg = loadConfig({ configPath: cfgPath });
-      assert.equal(cfg.master_url, "http://localhost:9210");
+      assert.equal(cfg.master_url, "http://localhost:9230");
       assert.equal(cfg.worker_name, "test-worker");
       assert.equal(cfg.reconnect_interval, 3);
     } finally {
@@ -46,7 +46,7 @@ describe("config", () => {
       );
 
       const cfg = loadConfig({ configPath: realCfgPath, identityPath: idPath });
-      assert.equal(cfg.master_url, "https://localhost:9210");
+      assert.equal(cfg.master_url, "https://localhost:9230");
       assert.equal(cfg.reconnect_interval, 5);
     } finally {
       fs.rmSync(tmp, { force: true, recursive: true });
@@ -75,12 +75,12 @@ describe("config", () => {
       const cfgPath = path.join(tmp, "config.toml");
       fs.writeFileSync(
         cfgPath,
-        'master_url = "http://localhost:9210"\nworker_id = "wrk_existing"\n',
+        'master_url = "http://localhost:9230"\nworker_id = "wrk_existing"\n',
         "utf-8",
       );
 
       const cfg = loadConfig({ configPath: cfgPath });
-      assert.equal(cfg.master_url, "http://localhost:9210");
+      assert.equal(cfg.master_url, "http://localhost:9230");
       assert.equal(cfg.worker_id, "wrk_existing");
     } finally {
       fs.rmSync(tmp, { force: true, recursive: true });
@@ -94,7 +94,7 @@ describe("config", () => {
       fs.writeFileSync(
         cfgPath,
         [
-          'master_url = "http://localhost:9210"',
+          'master_url = "http://localhost:9230"',
           'worker_name = "legacy-test"',
           "",
           "[worker]",
@@ -107,7 +107,7 @@ describe("config", () => {
       );
 
       const cfg = loadConfig({ configPath: cfgPath });
-      assert.equal(cfg.master_url, "http://localhost:9210");
+      assert.equal(cfg.master_url, "http://localhost:9230");
       assert.equal(cfg.worker_name, "legacy-test");
     } finally {
       fs.rmSync(tmp, { force: true, recursive: true });

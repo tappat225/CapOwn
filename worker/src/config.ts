@@ -189,7 +189,7 @@ export function loadConfig(opts?: LoadConfigOptions): WorkerNextConfig {
 
   // Apply defaults for Zod validation
   const candidate = {
-    master_url: (raw["master_url"] as string) ?? "https://localhost:9210",
+    master_url: (raw["master_url"] as string) ?? "https://localhost:9230",
     worker_name: (raw["worker_name"] as string) ?? undefined,
     worker_id: (raw["worker_id"] as string) ?? undefined,
     reconnect_interval:

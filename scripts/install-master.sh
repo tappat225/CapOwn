@@ -13,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MASTER_SRC="$(cd "${SCRIPT_DIR}/../master" && pwd)"
+VERSION_MANIFEST="$(cd "${SCRIPT_DIR}/.." && pwd)/version.json"
 CAPOWN_ROOT="${HOME}/.capown"
 
 while [[ $# -gt 0 ]]; do
@@ -66,12 +67,20 @@ fi
 echo "Go:     $(go version)"
 echo ""
 
+PRODUCT_VERSION="$(cd "${MASTER_SRC}" && go run ./cmd/capown-version --manifest "${VERSION_MANIFEST}" --field product_version)"
+PROTOCOL_VERSION="$(cd "${MASTER_SRC}" && go run ./cmd/capown-version --manifest "${VERSION_MANIFEST}" --field protocol_version)"
+echo "Product:  ${PRODUCT_VERSION}"
+echo "Protocol: ${PROTOCOL_VERSION}"
+echo ""
+
 mkdir -p "${MASTER_DIR}/data" "${BIN_DIR}"
 
 echo "Building Master..."
 (
   cd "${MASTER_SRC}"
-  go build -o "${BINARY_FILE}" ./cmd/capown-master
+  go build \
+    -ldflags "-X github.com/capown/master/internal/version.ProductVersion=${PRODUCT_VERSION} -X github.com/capown/master/internal/version.ProtocolVersion=${PROTOCOL_VERSION}" \
+    -o "${BINARY_FILE}" ./cmd/capown-master
 )
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then

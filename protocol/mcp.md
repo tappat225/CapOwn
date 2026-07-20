@@ -12,7 +12,7 @@ container capabilities.
 Send JSON-RPC requests with:
 
 ```text
-POST http://localhost:9210/mcp
+POST http://localhost:9230/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
 Authorization: Bearer <client-token>

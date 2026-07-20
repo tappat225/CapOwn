@@ -92,7 +92,7 @@ describe("Worker initialization", () => {
       const idPath = path.join(tmp, "identity.toml");
       fs.writeFileSync(
         cfgPath,
-        'master_url = "http://localhost:9210"\n',
+        'master_url = "http://localhost:9230"\n',
         "utf-8",
       );
 
@@ -117,7 +117,7 @@ describe("Worker initialization", () => {
       const idPath = path.join(tmp, "identity.toml");
       fs.writeFileSync(
         cfgPath,
-        'master_url = "http://localhost:9210"\n',
+        'master_url = "http://localhost:9230"\n',
         "utf-8",
       );
       fs.writeFileSync(

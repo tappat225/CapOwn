@@ -15,6 +15,7 @@ import (
 	"github.com/capown/master/internal/service"
 	"github.com/capown/master/internal/store"
 	"github.com/capown/master/internal/tasks"
+	"github.com/capown/master/internal/version"
 )
 
 // Server holds all dependencies for the HTTP API.
@@ -211,8 +212,8 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	initialized := s.store.CountUsers() > 0
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
-		Version:         "0.1.0",
-		ProtocolVersion: "0.1.0",
+		Version:         version.ProductVersion,
+		ProtocolVersion: version.ProtocolVersion,
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})

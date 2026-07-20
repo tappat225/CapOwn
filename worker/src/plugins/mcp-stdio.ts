@@ -18,6 +18,7 @@ import type {
   PluginStatus,
 } from "./types.js";
 import { PluginError, PluginErrorCodes } from "./errors.js";
+import { PRODUCT_VERSION } from "../generated/version.js";
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -133,7 +134,7 @@ export class McpStdioAdapter extends EventEmitter {
         {
           protocolVersion: "2025-03-26",
           capabilities: {},
-          clientInfo: { name: "capown-worker", version: "0.1.0" },
+          clientInfo: { name: "capown-worker", version: PRODUCT_VERSION },
         },
         this.manifest.limits?.startup_timeout_seconds ?? 15,
       );

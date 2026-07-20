@@ -91,7 +91,7 @@ Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
 - Authentication uses `Authorization: Bearer <token>` unless an endpoint says
   otherwise.
 - The configured Master URL is an origin only, for example
-  `https://master.example.com:9210`; clients append the protocol path.
+  `https://master.example.com:9230`; clients append the protocol path.
 - Dashboard SSE uses `text/event-stream`. A comment line such as `: ping` is a
   heartbeat and is not an application event.
 
