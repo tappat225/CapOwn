@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-/** CLI entry point for Worker Next -- `capown-worker` command. */
+/** CLI entry point for the CapOwn Worker -- `capown-worker` command. */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import * as TOML from "toml";
 import { log } from "./logging.js";
 import { WorkerRunner, makeWorkerNameSlug } from "./runner.js";
-import { loadConfig, writeConfigFile, type WorkerNextConfig } from "./config.js";
+import { loadConfig, writeConfigFile, type WorkerConfig } from "./config.js";
 import {
   loadOrGenerateIdentity,
   saveIdentityIds,
@@ -118,9 +118,8 @@ function printHelp(): void {
     "  -V, --version    Show version",
     "",
     "Environment:",
-    "  CAPOWN_WORKER_NEXT_CONFIG  Config file path",
     "  CAPOWN_WORKER_CONFIG       Config file path",
-    "  CAPOWN_CONFIG              Config file path (lowest priority)",
+    "  CAPOWN_CONFIG              Config file path (lower priority)",
     "  CAPOWN_WORKER_IDENTITY     Identity file path",
     "",
     "Registration link format:",
@@ -196,8 +195,7 @@ async function handleRegister(args: CliArgs): Promise<number> {
   }
 
   // Resolve config and identity paths
-  const envConfig = process.env["CAPOWN_WORKER_NEXT_CONFIG"] ??
-    process.env["CAPOWN_WORKER_CONFIG"] ??
+  const envConfig = process.env["CAPOWN_WORKER_CONFIG"] ??
     process.env["CAPOWN_CONFIG"];
   const configPath = args.config || envConfig || path.join(os.homedir(), ".capown", "worker", "config.toml");
 
@@ -216,7 +214,7 @@ async function handleRegister(args: CliArgs): Promise<number> {
   if (!workerName) {
     try {
       const existingConfig = loadConfig({ configPath: resolvedConfigPath, identityPath: resolvedIdentityPath });
-      if (existingConfig.worker_name && existingConfig.worker_name !== "my-worker-next") {
+      if (existingConfig.worker_name && existingConfig.worker_name !== "my-worker") {
         workerName = existingConfig.worker_name;
       }
     } catch {
@@ -277,7 +275,7 @@ async function handleRegister(args: CliArgs): Promise<number> {
 }
 
 async function handleStatus(args: CliArgs): Promise<number> {
-  let config: WorkerNextConfig;
+  let config: WorkerConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
   } catch (err) {
@@ -327,7 +325,7 @@ async function handleStatus(args: CliArgs): Promise<number> {
   return 0;
 }
 
-function resolveStartConfig(args: CliArgs): WorkerNextConfig | null {
+function resolveStartConfig(args: CliArgs): WorkerConfig | null {
   try {
     const config = loadConfig({ configPath: args.config, identityPath: args.identity });
     const identity = parseIdentityFile(config.identityPath);
@@ -343,7 +341,7 @@ function resolveStartConfig(args: CliArgs): WorkerNextConfig | null {
 }
 
 async function runWorkerInCurrentProcess(
-  config: WorkerNextConfig,
+  config: WorkerConfig,
   mode: WorkerProcessMode,
 ): Promise<number> {
   let runner: WorkerRunner | undefined;
@@ -432,7 +430,7 @@ async function handleStart(args: CliArgs): Promise<number> {
 }
 
 async function handleStop(args: CliArgs): Promise<number> {
-  let config: WorkerNextConfig;
+  let config: WorkerConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
   } catch (error) {
@@ -462,7 +460,7 @@ async function handleStop(args: CliArgs): Promise<number> {
 }
 
 async function handleLogs(args: CliArgs): Promise<number> {
-  let config: WorkerNextConfig;
+  let config: WorkerConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
   } catch (error) {
@@ -521,7 +519,7 @@ async function handleLogs(args: CliArgs): Promise<number> {
 }
 
 function handleConfigShow(args: CliArgs): number {
-  let config: WorkerNextConfig;
+  let config: WorkerConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
   } catch (err) {

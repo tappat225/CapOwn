@@ -7,7 +7,7 @@
 
 ## 1. Purpose and boundary
 
-CapOwn-next keeps the Worker core capability-neutral. The Worker core is
+CapOwn keeps the Worker core capability-neutral. The Worker core is
 responsible for:
 
 - Master registration, authentication, liveness, and reconnect;

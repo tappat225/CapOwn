@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="node" />
-/** Structured ASCII-only logging for Worker Next. */
+/** Structured ASCII-only logging for the Worker. */
 
 const enum Level {
   DEBUG = 0,
@@ -88,4 +88,4 @@ export class Logger {
 }
 
 /** Convenience root logger. */
-export const log = new Logger("worker-next");
+export const log = new Logger("worker");

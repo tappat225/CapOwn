@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Worker Next runtime: auth, heartbeat, job claim, and task execution. */
+/** Worker runtime: auth, heartbeat, job claim, and task execution. */
 
 import { log } from "./logging.js";
-import { loadConfig, type WorkerNextConfig } from "./config.js";
+import { loadConfig, type WorkerConfig } from "./config.js";
 import {
   loadOrGenerateIdentity,
   type IdentityData,
@@ -31,7 +31,7 @@ export interface WorkerRunnerOptions {
 export class WorkerRunner {
   private _abort = new AbortController();
   private _running = false;
-  private _config!: WorkerNextConfig;
+  private _config!: WorkerConfig;
   private _identity!: IdentityData;
   private _client!: MasterClient;
   private _pluginManager!: PluginManager;

@@ -1,4 +1,4 @@
-# AGENTS.md - CapOwn-next Agent Guide
+# AGENTS.md - Agent Guide
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
@@ -7,7 +7,7 @@
 
 ## Repository scope
 
-This repository is the next-generation CapOwn control plane. The legacy Python
+This repository is the CapOwn control plane. The legacy Python
 repository is a reference for behavior and migration only; do not assume that
 its modules, routes, dependencies, or deployment layout exist here.
 
@@ -149,7 +149,7 @@ Ask for confirmation before:
   bodies that may contain secrets or large payloads.
 - Never import Go Master code into Worker code, Worker code into Master code, or
   make the future Python Client depend on either implementation.
-- Never use old Python `shared/protocol.py` as the authority for next protocol
+- Never use old Python `shared/protocol.py` as the authority for formal protocol
   behavior; use `protocol/openapi.yaml` and update language-specific types from
   it.
 - Never copy the legacy deployment tree into this repository without checking

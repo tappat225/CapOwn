@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# install-worker.sh -- CapOwn Worker Next local source installation.
+# install-worker.sh -- CapOwn Worker local source installation.
 #
 # Installs the Worker from the local repository into ~/.capown/worker/.
 # Does not create systemd services, Windows services, or Docker Compose
@@ -46,8 +46,8 @@ CONFIG_FILE="${CONFIG_DIR}/config.toml"
 IDENTITY_FILE="${CONFIG_DIR}/identity.toml"
 LAUNCHER="${BIN_DIR}/capown-worker"
 
-echo "CapOwn Worker Next Installer"
-echo "============================"
+echo "CapOwn Worker Installer"
+echo "========================"
 echo ""
 echo "Prefix:  ${PREFIX}"
 echo "Source:  ${WORKER_SRC}"
@@ -129,7 +129,7 @@ echo ""
 echo "Creating launcher: ${LAUNCHER}"
 cat > "${LAUNCHER}" << 'LAUNCHER_EOF'
 #!/usr/bin/env bash
-# CapOwn Worker Next launcher
+# CapOwn Worker launcher
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/../worker/app" && pwd)"
 WORKER_DIR="$(cd "${APP_DIR}/.." && pwd)"

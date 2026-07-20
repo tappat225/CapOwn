@@ -2,9 +2,9 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-The next Master exposes a stateless MCP Streamable HTTP endpoint at `/mcp`.
+The Master exposes a stateless MCP Streamable HTTP endpoint at `/mcp`.
 It is a northbound interface for MCP hosts such as Codex. The endpoint uses
-the current next task protocol and does not expose legacy shell, file, or
+the current task protocol and does not expose legacy shell, file, or
 container capabilities.
 
 ## Transport

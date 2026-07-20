@@ -12,7 +12,7 @@ boundary.
 The current canonical document is:
 
 - [`openapi.yaml`](./openapi.yaml) — OpenAPI 3.1 description of the HTTP and
-  Server-Sent Events interfaces implemented by the current `next` milestone.
+  Server-Sent Events interfaces implemented by the current milestone.
 
 The MCP transport and tool contract is documented in [`mcp.md`](./mcp.md).
 
@@ -42,8 +42,8 @@ The current `/v1` contract covers:
 - `plugin_call` execution through MCP-over-stdio plugins; and
 - persistent plugin enable/disable control through the Worker task channel.
 
-The next Master also exposes a stateless MCP Streamable HTTP endpoint at
-`/mcp`. It accepts client bearer tokens and exposes only the current next tool
+The Master also exposes a stateless MCP Streamable HTTP endpoint at
+`/mcp`. It accepts client bearer tokens and exposes only the current tool
 surface; it does not provide the legacy shell, file, or container tools.
 
 Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:

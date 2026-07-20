@@ -1,7 +1,7 @@
 
-# CapOwn-next
+# CapOwn
 
-Next generation of CapOwn core service. Components:
+Core service of CapOwn. Components:
 
 - **`master/`** - Go HTTP API server (SQLite, Ed25519 auth, job claims, heartbeats)
 - **`worker/`** - TypeScript/Node Worker (job claims, plugin execution, heartbeats)

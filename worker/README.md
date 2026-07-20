@@ -1,8 +1,8 @@
-# Worker Next -- Experimental TypeScript Worker for CapOwn
+# CapOwn Worker -- TypeScript Worker
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-> Worker Next implements the current `/v1` Worker contract: registration,
+> CapOwn Worker implements the current `/v1` Worker contract: registration,
 > authentication, runtime heartbeats, and claim-based job execution. It does
 > not implement file, shell, or container capabilities.
 
@@ -96,14 +96,13 @@ process must still be treated as trusted local code.
 See `config.toml.example`. Resolution order:
 
 1. `--config <path>` flag
-2. `CAPOWN_WORKER_NEXT_CONFIG` env
-3. `CAPOWN_WORKER_CONFIG` env
-4. `CAPOWN_CONFIG` env
-5. `~/.capown/worker/config.toml`
+2. `CAPOWN_WORKER_CONFIG` env
+3. `CAPOWN_CONFIG` env
+4. `~/.capown/worker/config.toml`
 
 ### Identity
 
-Worker Next reuses the existing `~/.capown/worker/identity.toml` format.
+The Worker reuses the existing `~/.capown/worker/identity.toml` format.
 Ed25519 keys are generated using Node's `crypto` module and are fully
 interoperable with PyNaCl. Use `--identity <path>` or `CAPOWN_WORKER_IDENTITY`
 for isolated testing.

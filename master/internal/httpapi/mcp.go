@@ -152,7 +152,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 				"name":    mcpServerName,
 				"version": version.ProductVersion,
 			},
-			"instructions": "CapOwn next MCP server. Use plugin_call to invoke tools on owned Workers.",
+			"instructions": "CapOwn MCP server. Use plugin_call to invoke tools on owned Workers.",
 		}))
 	case "ping":
 		writeMCPResponse(w, http.StatusOK, mcpSuccess(request.ID, map[string]interface{}{}))

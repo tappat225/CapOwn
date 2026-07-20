@@ -1,7 +1,7 @@
 {
-  "name": "@capown/worker-next",
+  "name": "@capown/worker",
   "version": "0.1.0",
-  "description": "Next-generation CapOwn Worker (TypeScript) with claim-based jobs.",
+  "description": "CapOwn Worker (TypeScript) with claim-based jobs.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/src/cli.js",

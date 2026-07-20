@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Minimal CapOwn Next REST Client -- task and plugin operations.
+"""Minimal CapOwn REST Client -- task and plugin operations.
 
 Standard-library only (urllib). Targets the v1.4 protocol.
 """
@@ -33,7 +33,7 @@ class ApiError(Exception):
 
 
 class CapownClient:
-    """HTTP client for the CapOwn Next Master v1 API."""
+    """HTTP client for the CapOwn Master v1 API."""
 
     def __init__(self, config: ClientConfig) -> None:
         self.config = config
