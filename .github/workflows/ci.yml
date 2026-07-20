@@ -29,6 +29,9 @@ jobs:
         with:
           node-version: 20.18.x
 
+      - name: Generate Worker version metadata
+        run: node scripts/version.mjs sync-worker
+
       - name: Check version metadata
         run: node scripts/version.mjs check
 
