@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Integration tests for Daemon startup and worker name slug generation. */
+/** Integration tests for Worker startup and worker name slug generation. */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeWorkerNameSlug } from "../src/daemon.js";
+import { makeWorkerNameSlug } from "../src/runner.js";
 
 // --------------------------------------------------------------------------
-// Worker name slug (exported from daemon.ts for testing)
+// Worker name slug (exported from runner.ts for testing)
 // --------------------------------------------------------------------------
 
 describe("makeWorkerNameSlug", () => {
@@ -68,12 +68,7 @@ describe("makeWorkerNameSlug", () => {
   });
 
   it("matches Python slug behavior for typical hostnames", () => {
-    const cases = [
-      "my-worker",
-      "test-host-01",
-      "raspberrypi",
-      "localhost",
-    ];
+    const cases = ["my-worker", "test-host-01", "raspberrypi", "localhost"];
     for (const host of cases) {
       const slug = makeWorkerNameSlug(host);
       assert.match(
@@ -86,44 +81,43 @@ describe("makeWorkerNameSlug", () => {
 });
 
 // --------------------------------------------------------------------------
-// Daemon initialization
+// Worker initialization
 // --------------------------------------------------------------------------
 
-describe("Daemon initialization", () => {
+describe("Worker initialization", () => {
   it("rejects missing worker_id in identity", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "daemon-test-"));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "worker-test-"));
     try {
       const cfgPath = path.join(tmp, "config.toml");
       const idPath = path.join(tmp, "identity.toml");
       fs.writeFileSync(
         cfgPath,
-        'master_url = "http://localhost:9210"\n',
+        'master_url = "http://localhost:9230"\n',
         "utf-8",
       );
 
-      const { Daemon } = await import("../src/daemon.js");
-      const daemon = new Daemon({
+      const { WorkerRunner } = await import("../src/runner.js");
+      const runner = new WorkerRunner({
         configPath: cfgPath,
         identityPath: idPath,
       });
       // Identity file missing worker_id and keys -> generates keys but no worker_id
-      await assert.rejects(
-        () => (daemon as any)._init(),
-        /no worker_id found/,
-      );
+      await assert.rejects(() => (runner as any)._init(), /no worker_id found/);
     } finally {
       fs.rmSync(tmp, { force: true, recursive: true });
     }
   });
 
   it("accepts existing worker_id in identity", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "daemon-test2-"));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "worker-test2-"));
+    let runner:
+      InstanceType<typeof import("../src/runner.js").WorkerRunner> | undefined;
     try {
       const cfgPath = path.join(tmp, "config.toml");
       const idPath = path.join(tmp, "identity.toml");
       fs.writeFileSync(
         cfgPath,
-        'master_url = "http://localhost:9210"\n',
+        'master_url = "http://localhost:9230"\n',
         "utf-8",
       );
       fs.writeFileSync(
@@ -137,13 +131,14 @@ describe("Daemon initialization", () => {
         "utf-8",
       );
 
-      const { Daemon } = await import("../src/daemon.js");
-      const daemon = new Daemon({
+      const { WorkerRunner } = await import("../src/runner.js");
+      runner = new WorkerRunner({
         configPath: cfgPath,
         identityPath: idPath,
       });
-      await (daemon as any)._init();
+      await (runner as any)._init();
     } finally {
+      await (runner as any)?._pluginManager?.stopPlugins();
       fs.rmSync(tmp, { force: true, recursive: true });
     }
   });

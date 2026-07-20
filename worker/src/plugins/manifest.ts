@@ -151,7 +151,7 @@ export function validateManifest(raw: Record<string, unknown>): PluginManifest {
   };
 }
 
-export async function loadManifests(pluginsDir: string): Promise<PluginManifest[]> {
+export async function loadManifests(pluginsDir: string): Promise<LoadedPluginManifest[]> {
   let files: string[];
   try {
     files = await readdir(pluginsDir);
@@ -160,7 +160,7 @@ export async function loadManifests(pluginsDir: string): Promise<PluginManifest[
   }
 
   const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
-  const manifests: PluginManifest[] = [];
+  const manifests: LoadedPluginManifest[] = [];
   const seenIds = new Set<string>();
 
   for (const file of jsonFiles) {
@@ -176,7 +176,7 @@ export async function loadManifests(pluginsDir: string): Promise<PluginManifest[
       }
       seenIds.add(manifest.plugin_id);
 
-      manifests.push(manifest);
+      manifests.push({ manifest, path: filePath });
     } catch (err) {
       const baseName = parse(file).base;
       console.warn(`[plugins] skipping invalid manifest ${baseName}:`, (err as Error).message);
@@ -184,4 +184,9 @@ export async function loadManifests(pluginsDir: string): Promise<PluginManifest[
   }
 
   return manifests;
+}
+
+export interface LoadedPluginManifest {
+  manifest: PluginManifest;
+  path: string;
 }

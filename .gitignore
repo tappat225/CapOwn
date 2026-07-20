@@ -3,5 +3,10 @@ master/data/
 master/.gocache/
 worker/node_modules/
 worker/dist/
+worker/src/generated/
 __pycache__/
 *.py[cod]
+
+.codex/
+.claude/
+.agents/

@@ -7,6 +7,7 @@ export type PluginAdapter = McpStdioAdapter;
 
 export interface RegisteredPlugin {
   manifest: PluginManifest;
+  manifestPath: string;
   adapter: PluginAdapter;
 }
 
@@ -14,13 +15,13 @@ export class PluginRegistry {
   private plugins = new Map<string, RegisteredPlugin>();
   private statusListeners = new Set<(info: PluginInfo[]) => void>();
 
-  register(manifest: PluginManifest): RegisteredPlugin {
+  register(manifest: PluginManifest, manifestPath = ""): RegisteredPlugin {
     if (this.plugins.has(manifest.plugin_id)) {
       throw new Error(`plugin "${manifest.plugin_id}" is already registered`);
     }
 
     const adapter = new McpStdioAdapter(manifest);
-    const entry: RegisteredPlugin = { manifest, adapter };
+    const entry: RegisteredPlugin = { manifest, manifestPath, adapter };
     this.plugins.set(manifest.plugin_id, entry);
 
     adapter.on("statusChanged", () => {
@@ -45,6 +46,10 @@ export class PluginRegistry {
   onSnapshotsChanged(listener: (info: PluginInfo[]) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
+  }
+
+  emitSnapshotsChanged(): void {
+    this.notifyListeners();
   }
 
   private notifyListeners(): void {

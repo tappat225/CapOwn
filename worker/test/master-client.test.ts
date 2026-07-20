@@ -64,7 +64,7 @@ function mockFetch(url: string, opts: RequestInit): Promise<Response> {
 // Tests
 // --------------------------------------------------------------------------
 
-const MASTER_URL = "http://mock-master:9210";
+const MASTER_URL = "http://mock-master:9230";
 
 describe("MasterClient", () => {
   before(() => {
@@ -227,11 +227,36 @@ describe("MasterClient", () => {
       path: "/v1/workers/wrk_runtime_test/runtime",
       status: 200,
       body: { worker_id: "wrk_runtime_test", hostname: "test-host", capabilities: [] },
+      match: (body) => {
+        const runtime = body as {
+          capabilities?: string[];
+          plugins?: Array<{ plugin_id?: string }>;
+        };
+        return (
+          runtime.capabilities?.includes("plugin.invoke") === true &&
+          runtime.plugins?.[0]?.plugin_id === "filesystem"
+        );
+      },
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
     client.sessionToken = "cown_sess_valid";
-    const ok = await client.reportRuntime("wrk_runtime_test");
+    const ok = await client.reportRuntime(
+      "wrk_runtime_test",
+      [
+        {
+          plugin_id: "filesystem",
+          version: "1.0.0",
+          kind: "mcp",
+          transport: "stdio",
+          enabled: true,
+          status: "running",
+          tools: [],
+          error: "",
+        },
+      ],
+      ["plugin.invoke"],
+    );
 
     assert.equal(ok, true);
   });
@@ -266,5 +291,94 @@ describe("MasterClient", () => {
 
     assert.equal(ok, false);
     assert.equal(client.sessionToken, "cown_sess_valid");
+  });
+
+  // ------------------------------------------------------------------
+  // claimJobs
+  // ------------------------------------------------------------------
+
+  it("claimJobs returns jobs from long-poll endpoint", async () => {
+    addHandler({
+      method: "POST",
+      path: "/v1/workers/wrk_claim_test/jobs/claim",
+      status: 200,
+      body: {
+        jobs: [
+          {
+            job_type: "task",
+            delivery_id: "job_0123456789abcdef01234567",
+            task_id: "tsk_0123456789abcdef01234567",
+            task_type: "plugin_call",
+            params: { plugin_id: "demo", tool_name: "echo", arguments: {} },
+            timeout_seconds: 30,
+          },
+        ],
+      },
+    });
+
+    const client = new MasterClient({ masterUrl: MASTER_URL });
+    client.sessionToken = "cown_sess_valid";
+    const response = await client.claimJobs("wrk_claim_test", {
+      limit: 1,
+      waitSeconds: 0,
+    });
+
+    assert.ok(response);
+    assert.equal(response.jobs.length, 1);
+    assert.equal(response.jobs[0].job_type, "task");
+    assert.equal(response.jobs[0].task_id, "tsk_0123456789abcdef01234567");
+  });
+
+  it("claimJobs clears session on 401", async () => {
+    addHandler({
+      method: "POST",
+      path: "/v1/workers/wrk_claim_unauth/jobs/claim",
+      status: 401,
+      body: { error: { code: "unauthorized", message: "bad token", details: null } },
+    });
+
+    const client = new MasterClient({ masterUrl: MASTER_URL });
+    client.sessionToken = "cown_sess_expired";
+    const response = await client.claimJobs("wrk_claim_unauth", { waitSeconds: 0 });
+
+    assert.equal(response, null);
+    assert.equal(client.sessionToken, "");
+  });
+
+  it("classifies task result failures for durable retry", async () => {
+    const report = {
+      task_id: "tsk_0123456789abcdef01234567",
+      delivery_id: "job_0123456789abcdef01234567",
+      worker_id: "wrk_0123456789abcdef01234567",
+      status: "running" as const,
+      truncated: false,
+    };
+
+    addHandler({
+      method: "PUT",
+      path: "/v1/tasks/tsk_0123456789abcdef01234567/result",
+      status: 503,
+      body: { error: { code: "internal", message: "retry", details: null } },
+    });
+    const retryClient = new MasterClient({ masterUrl: MASTER_URL });
+    retryClient.sessionToken = "cown_sess_valid";
+    assert.equal(
+      await retryClient.reportTaskResultOutcome(report.task_id, report),
+      "retryable",
+    );
+
+    resetHandlers();
+    addHandler({
+      method: "PUT",
+      path: "/v1/tasks/tsk_0123456789abcdef01234567/result",
+      status: 400,
+      body: { error: { code: "invalid_input", message: "rejected", details: null } },
+    });
+    const rejectedClient = new MasterClient({ masterUrl: MASTER_URL });
+    rejectedClient.sessionToken = "cown_sess_valid";
+    assert.equal(
+      await rejectedClient.reportTaskResultOutcome(report.task_id, report),
+      "rejected",
+    );
   });
 });

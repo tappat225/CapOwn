@@ -15,7 +15,6 @@ export interface WorkerRegistrationRequest {
   capabilities: string[];
   workspace: string;
 }
-
 export interface WorkerRegistrationResponse {
   worker_id: string;
   worker_name: string;
@@ -67,7 +66,7 @@ export interface WorkerReconnectRequest {
   mode: string;
   capabilities: string[];
   workspace: string;
-  plugins?: PluginInfoItem[];
+  plugins: PluginInfoItem[];
 }
 
 // --------------------------------------------------------------------------
@@ -77,6 +76,8 @@ export interface WorkerReconnectRequest {
 export interface WorkerInfo {
   worker_id: string;
   worker_name: string;
+  owner_user_id: string;
+  owner_username: string;
   hostname: string;
   os: string;
   mode: string;
@@ -85,7 +86,7 @@ export interface WorkerInfo {
   status: "online" | "offline";
   last_heartbeat: string | null;
   registered_at: string | null;
-  plugins?: PluginInfoItem[];
+  plugins: PluginInfoItem[];
 }
 
 // --------------------------------------------------------------------------
@@ -103,6 +104,7 @@ export interface PluginInfoItem {
   version: string;
   kind: string;
   transport: string;
+  enabled: boolean;
   status: PluginStatus;
   tools: PluginToolInfoItem[];
   error: string;
@@ -111,20 +113,33 @@ export interface PluginInfoItem {
 export type PluginStatus = "starting" | "running" | "stopped" | "error" | "disabled";
 
 // --------------------------------------------------------------------------
-// Task types (v1.2)
+// Task / job types (v1.5)
 // --------------------------------------------------------------------------
 
-export interface TaskEvent {
+export type JobType = "task" | "cancel";
+
+export interface WorkerJob {
+  job_type: JobType;
+  delivery_id: string;
   task_id: string;
-  task_type: string;
-  params: Record<string, unknown>;
-  timeout_seconds: number;
+  task_type?: string;
+  params?: Record<string, unknown>;
+  timeout_seconds?: number;
+}
+
+export interface WorkerJobsResponse {
+  jobs: WorkerJob[];
 }
 
 export interface PluginCallParams {
   plugin_id: string;
   tool_name: string;
   arguments: Record<string, unknown>;
+}
+
+export interface PluginSetEnabledParams {
+  plugin_id: string;
+  enabled: boolean;
 }
 
 export interface ContentBlock {
@@ -141,8 +156,9 @@ export interface PluginCallResult {
 
 export interface TaskResultReport {
   task_id: string;
+  delivery_id: string;
   worker_id: string;
-  status: TaskStatus;
+  status: TaskResultStatus;
   result?: PluginCallResult;
   error?: {
     code: string;
@@ -154,7 +170,7 @@ export interface TaskResultReport {
   truncated: boolean;
 }
 
-export type TaskStatus = "pending" | "running" | "completed" | "failed" | "timeout" | "canceled";
+export type TaskResultStatus = "running" | "completed" | "failed" | "timeout" | "canceled";
 
 // --------------------------------------------------------------------------
 // API error envelope
@@ -166,13 +182,4 @@ export interface ApiErrorEnvelope {
     message: string;
     details: unknown;
   };
-}
-
-// --------------------------------------------------------------------------
-// SSE event
-// --------------------------------------------------------------------------
-
-export interface SSEEvent {
-  event: string;
-  data: Record<string, unknown>;
 }

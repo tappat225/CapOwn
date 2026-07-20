@@ -1,12 +1,14 @@
+#!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 /** CLI entry point for Worker Next -- `capown-worker` command. */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { spawn } from "node:child_process";
 import * as TOML from "toml";
 import { log } from "./logging.js";
-import { Daemon, makeWorkerNameSlug } from "./daemon.js";
+import { WorkerRunner, makeWorkerNameSlug } from "./runner.js";
 import { loadConfig, writeConfigFile, type WorkerNextConfig } from "./config.js";
 import {
   loadOrGenerateIdentity,
@@ -15,19 +17,35 @@ import {
 } from "./identity.js";
 import { MasterClient } from "./master-client.js";
 import { getPlatformInfo } from "./platform.js";
+import {
+  getWorkerProcessInfo,
+  requestWorkerStop,
+  startRuntimeControl,
+  waitForWorkerStatus,
+  workerLogPath,
+  readWorkerLogTail,
+  readWorkerLogTailSnapshot,
+  followWorkerLog,
+  type RuntimeControl,
+  type WorkerProcessMode,
+} from "./service.js";
+import { PRODUCT_VERSION as VERSION } from "./generated/version.js";
 
-const VERSION = "0.1.0";
-
-interface CliArgs {
+export interface CliArgs {
   command: string;
   config?: string;
   identity?: string;
   name?: string;
   link?: string;
+  foreground?: boolean;
+  backgroundChild?: boolean;
+  lines?: number;
+  follow?: boolean;
 }
 
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { command: "daemon" };
+export function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = { command: "start" };
+  let commandSeen = false;
   let i = 0;
   while (i < argv.length) {
     const a = argv[i];
@@ -37,22 +55,33 @@ function parseArgs(argv: string[]): CliArgs {
       args.identity = argv[++i];
     } else if (a === "--name" && i + 1 < argv.length) {
       args.name = argv[++i];
+    } else if (a === "--lines" && i + 1 < argv.length) {
+      args.lines = Number(argv[++i]);
+    } else if (a === "--no-follow") {
+      args.follow = false;
+    } else if (a === "--foreground" || a === "-f") {
+      args.foreground = true;
+    } else if (a === "--background-child") {
+      args.foreground = true;
+      args.backgroundChild = true;
     } else if (a === "--help" || a === "-h") {
       args.command = "help";
     } else if (a === "--version" || a === "-V") {
       args.command = "version";
     } else if (!a.startsWith("-")) {
-      if (a === "register" || a === "daemon" || a === "status" || a === "help" || a === "version") {
+      if (!commandSeen && (a === "register" || a === "start" || a === "stop" || a === "status" || a === "logs" || a === "help" || a === "version")) {
         args.command = a;
-      } else if (a === "config") {
+        commandSeen = true;
+      } else if (!commandSeen && a === "config") {
         args.command = a;
-      } else if (args.command === "daemon") {
-        args.command = "register";
-        args.link = a;
+        commandSeen = true;
       } else if (args.command === "register" && !args.link) {
         args.link = a;
       } else if (args.command === "config") {
         args.link = a; // subcommand (e.g. "show")
+      } else if (!commandSeen) {
+        args.command = a;
+        commandSeen = true;
       }
     }
     i++;
@@ -69,8 +98,11 @@ function printHelp(): void {
     "",
     "Commands:",
     "  register <link> [--name <name>]  Register this worker with a Master",
-    "  daemon                           Start the Worker Next daemon (default)",
-    "  status                           Show worker status and configuration",
+    "  start                            Start the Worker in the background (default)",
+    "  start --foreground               Run the Worker in the current terminal",
+    "  status                           Show registration and process status",
+    "  stop                             Stop the running Worker",
+    "  logs [--lines <count>]            Follow Worker logs (default: last 200 lines)",
     "  config show                      Display current configuration",
     "  help                             Show this help message",
     "  version                          Show version",
@@ -79,6 +111,9 @@ function printHelp(): void {
     "  --config <path>  Path to config TOML file",
     "  --identity <path> Path to identity TOML file",
     "  --name <name>    Worker name (for register command)",
+    "  --lines <count>  Number of log lines to show",
+    "  --no-follow      Show recent logs and exit",
+    "  -f, --foreground Run start in the current terminal",
     "  -h, --help       Show this help message",
     "  -V, --version    Show version",
     "",
@@ -236,12 +271,12 @@ async function handleRegister(args: CliArgs): Promise<number> {
   process.stdout.write("  Master URL:  " + parsed.masterUrl + "\n");
   process.stdout.write("\n");
   process.stdout.write("Next steps:\n");
-  process.stdout.write("  capown-worker daemon\n");
+  process.stdout.write("  capown-worker start\n");
 
   return 0;
 }
 
-function handleStatus(args: CliArgs): number {
+async function handleStatus(args: CliArgs): Promise<number> {
   let config: WorkerNextConfig;
   try {
     config = loadConfig({ configPath: args.config, identityPath: args.identity });
@@ -267,15 +302,222 @@ function handleStatus(args: CliArgs): number {
   process.stdout.write("  Worker Name: " + (identity.workerName || "<not set>") + "\n");
   process.stdout.write("\n");
 
+  const processInfo = await getWorkerProcessInfo(config.configPath);
+  process.stdout.write("Process:\n");
+  process.stdout.write("  Status:      " + processInfo.status.toUpperCase() + "\n");
+  if (processInfo.pid) process.stdout.write("  PID:         " + processInfo.pid + "\n");
+  if (processInfo.mode) process.stdout.write("  Mode:        " + processInfo.mode + "\n");
+  if (processInfo.startedAt) process.stdout.write("  Started:     " + processInfo.startedAt + "\n");
+  process.stdout.write("  Log:         " + processInfo.logPath + "\n");
+  process.stdout.write("\n");
+
   if (!identity.workerId) {
     process.stdout.write("Status: NOT REGISTERED\n");
     process.stdout.write("Run 'capown-worker register <link>' to register.\n");
+  } else if (processInfo.status === "running") {
+    process.stdout.write("Status: RUNNING\n");
+    process.stdout.write("Run 'capown-worker stop' to stop.\n");
+  } else if (processInfo.status === "starting") {
+    process.stdout.write("Status: STARTING\n");
   } else {
-    process.stdout.write("Status: READY\n");
-    process.stdout.write("Run 'capown-worker daemon' to start.\n");
+    process.stdout.write("Status: STOPPED\n");
+    process.stdout.write("Run 'capown-worker start' to start.\n");
   }
 
   return 0;
+}
+
+function resolveStartConfig(args: CliArgs): WorkerNextConfig | null {
+  try {
+    const config = loadConfig({ configPath: args.config, identityPath: args.identity });
+    const identity = parseIdentityFile(config.identityPath);
+    if (!identity.workerId) {
+      process.stderr.write("error: Worker is not registered; run 'capown-worker register <link>' first\n");
+      return null;
+    }
+    return config;
+  } catch (error) {
+    process.stderr.write("error: failed to load Worker configuration: " + String(error) + "\n");
+    return null;
+  }
+}
+
+async function runWorkerInCurrentProcess(
+  config: WorkerNextConfig,
+  mode: WorkerProcessMode,
+): Promise<number> {
+  let runner: WorkerRunner | undefined;
+  let control: RuntimeControl | undefined;
+  try {
+    const runtimeControl = await startRuntimeControl({
+      configPath: config.configPath,
+      identityPath: config.identityPath,
+      mode,
+      onStop: () => runner?.stop(),
+    });
+    control = runtimeControl;
+    runner = new WorkerRunner({
+      configPath: config.configPath,
+      identityPath: config.identityPath,
+      onReady: () => runtimeControl.markRunning(),
+    });
+    await runner.run();
+    return 0;
+  } catch (error) {
+    log.error("worker: fatal error: %s", error);
+    return 1;
+  } finally {
+    await control?.close();
+  }
+}
+
+async function handleStart(args: CliArgs): Promise<number> {
+  const config = resolveStartConfig(args);
+  if (!config) return 1;
+
+  const existing = await getWorkerProcessInfo(config.configPath);
+  if (existing.status !== "stopped") {
+    process.stderr.write(
+      `error: Worker is already ${existing.status}${existing.pid ? ` (PID ${existing.pid})` : ""}\n`,
+    );
+    return 1;
+  }
+
+  if (args.foreground) {
+    return await runWorkerInCurrentProcess(
+      config,
+      args.backgroundChild ? "background" : "foreground",
+    );
+  }
+
+  const logPath = workerLogPath(config.configPath);
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const logDescriptor = fs.openSync(logPath, "a", 0o600);
+  let child;
+  try {
+    child = spawn(
+      process.execPath,
+      [
+        path.resolve(process.argv[1]),
+        "start",
+        "--background-child",
+        "--config",
+        config.configPath,
+        "--identity",
+        config.identityPath,
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", logDescriptor, logDescriptor],
+        windowsHide: true,
+      },
+    );
+    child.unref();
+  } catch (error) {
+    process.stderr.write("error: failed to start Worker: " + String(error) + "\n");
+    return 1;
+  } finally {
+    fs.closeSync(logDescriptor);
+  }
+
+  const processInfo = await waitForWorkerStatus(config.configPath, "running", 10_000);
+  if (processInfo.status !== "running") {
+    process.stderr.write(`error: Worker failed to start; check ${logPath}\n`);
+    return 1;
+  }
+
+  process.stdout.write(`Worker started in the background (PID ${processInfo.pid}).\n`);
+  process.stdout.write(`Log: ${processInfo.logPath}\n`);
+  return 0;
+}
+
+async function handleStop(args: CliArgs): Promise<number> {
+  let config: WorkerNextConfig;
+  try {
+    config = loadConfig({ configPath: args.config, identityPath: args.identity });
+  } catch (error) {
+    process.stderr.write("error: failed to load Worker configuration: " + String(error) + "\n");
+    return 1;
+  }
+
+  const current = await getWorkerProcessInfo(config.configPath);
+  if (current.status === "stopped") {
+    process.stdout.write("Worker is not running.\n");
+    return 0;
+  }
+
+  try {
+    await requestWorkerStop(config.configPath);
+  } catch (error) {
+    process.stderr.write("error: failed to stop Worker: " + String(error) + "\n");
+    return 1;
+  }
+  const stopped = await waitForWorkerStatus(config.configPath, "stopped", 10_000);
+  if (stopped.status !== "stopped") {
+    process.stderr.write("error: Worker did not stop within 10 seconds\n");
+    return 1;
+  }
+  process.stdout.write("Worker stopped.\n");
+  return 0;
+}
+
+async function handleLogs(args: CliArgs): Promise<number> {
+  let config: WorkerNextConfig;
+  try {
+    config = loadConfig({ configPath: args.config, identityPath: args.identity });
+  } catch (error) {
+    process.stderr.write("error: failed to load Worker configuration: " + String(error) + "\n");
+    return 1;
+  }
+
+  const lineCount = args.lines ?? 200;
+  if (!Number.isInteger(lineCount) || lineCount <= 0) {
+    process.stderr.write("error: --lines must be a positive integer\n");
+    return 1;
+  }
+
+  const logPath = workerLogPath(config.configPath);
+  try {
+    if (args.follow === false) {
+      if (!fs.existsSync(logPath)) {
+        process.stdout.write(`No Worker log found at ${logPath}\n`);
+        return 0;
+      }
+      process.stdout.write(readWorkerLogTail(logPath, lineCount));
+      return 0;
+    }
+
+    let startPosition = 0;
+    if (fs.existsSync(logPath)) {
+      const snapshot = readWorkerLogTailSnapshot(logPath, lineCount);
+      process.stdout.write(snapshot.text);
+      startPosition = snapshot.position;
+    } else {
+      process.stderr.write(`Waiting for Worker log at ${logPath}...\n`);
+    }
+
+    const controller = new AbortController();
+    const stopFollowing = (): void => controller.abort();
+    process.once("SIGINT", stopFollowing);
+    process.once("SIGTERM", stopFollowing);
+    try {
+      await followWorkerLog({
+        logPath,
+        startPosition,
+        signal: controller.signal,
+        onData: (chunk) => {
+          process.stdout.write(chunk);
+        },
+      });
+    } finally {
+      process.off("SIGINT", stopFollowing);
+      process.off("SIGTERM", stopFollowing);
+    }
+    return 0;
+  } catch (error) {
+    process.stderr.write("error: failed to read Worker log: " + String(error) + "\n");
+    return 1;
+  }
 }
 
 function handleConfigShow(args: CliArgs): number {
@@ -316,7 +558,13 @@ export async function main(argv: string[]): Promise<number> {
       return await handleRegister(args);
     }
     case "status": {
-      return handleStatus(args);
+      return await handleStatus(args);
+    }
+    case "stop": {
+      return await handleStop(args);
+    }
+    case "logs": {
+      return await handleLogs(args);
     }
     case "config": {
       if (args.link === "show") {
@@ -325,15 +573,8 @@ export async function main(argv: string[]): Promise<number> {
       process.stderr.write("usage: capown-worker config show\n");
       return 1;
     }
-    case "daemon": {
-      const daemon = new Daemon({ configPath: args.config, identityPath: args.identity });
-      try {
-        await daemon.run();
-      } catch (err) {
-        log.error("daemon: fatal error: %s", err);
-        return 1;
-      }
-      return 0;
+    case "start": {
+      return await handleStart(args);
     }
     default: {
       process.stderr.write("unknown command: " + args.command + "\n");

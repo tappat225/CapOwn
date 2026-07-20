@@ -18,6 +18,8 @@ type patchWorkerRequest struct {
 type workerListItem struct {
 	WorkerID           string              `json:"worker_id"`
 	WorkerName         string              `json:"worker_name"`
+	OwnerUserID        string              `json:"owner_user_id"`
+	OwnerUsername      string              `json:"owner_username"`
 	Hostname           string              `json:"hostname"`
 	OS                 string              `json:"os"`
 	Mode               string              `json:"mode"`
@@ -60,13 +62,33 @@ func strPtr(s string, valid bool) *string {
 
 func pluginsToSlice(raw string) []domain.PluginInfo {
 	if raw == "" {
-		return nil
+		return []domain.PluginInfo{}
 	}
 	var plugins []domain.PluginInfo
 	if err := json.Unmarshal([]byte(raw), &plugins); err != nil || len(plugins) == 0 {
-		return nil
+		return []domain.PluginInfo{}
 	}
 	return plugins
+}
+
+func workerListItemFromRow(w *store.WorkerRow, ownerUsername string) workerListItem {
+	return workerListItem{
+		WorkerID:           w.WorkerID,
+		WorkerName:         w.WorkerName,
+		OwnerUserID:        w.OwnerUserID,
+		OwnerUsername:      ownerUsername,
+		Hostname:           w.Hostname,
+		OS:                 w.OS,
+		Mode:               w.Mode,
+		Capabilities:       capabilitiesToSlice(w.Capabilities),
+		Workspace:          w.Workspace,
+		Status:             w.Status,
+		LastHeartbeat:      strPtr(w.LastHeartbeat.String, w.LastHeartbeat.Valid),
+		RegisteredAt:       strPtr(w.RegisteredAt.String, w.RegisteredAt.Valid),
+		PreviousWorkerName: strPtr(w.PreviousWorkerName.String, w.PreviousWorkerName.Valid),
+		RenamedAt:          strPtr(w.RenamedAt.String, w.RenamedAt.Valid),
+		Plugins:            pluginsToSlice(w.Plugins.String),
+	}
 }
 
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
@@ -90,26 +112,21 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]workerListItem, 0, len(workers))
+	users, err := s.store.ListUsers()
+	if err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	ownerNames := make(map[string]string, len(users))
+	for _, user := range users {
+		ownerNames[user.UserID] = user.Username
+	}
 	for _, w := range workers {
 		// Skip revoked workers in normal listings
 		if w.RevokedAt.Valid {
 			continue
 		}
-		items = append(items, workerListItem{
-			WorkerID:           w.WorkerID,
-			WorkerName:         w.WorkerName,
-			Hostname:           w.Hostname,
-			OS:                 w.OS,
-			Mode:               w.Mode,
-			Capabilities:       capabilitiesToSlice(w.Capabilities),
-			Workspace:          w.Workspace,
-			Status:             w.Status,
-			LastHeartbeat:      strPtr(w.LastHeartbeat.String, w.LastHeartbeat.Valid),
-			RegisteredAt:       strPtr(w.RegisteredAt.String, w.RegisteredAt.Valid),
-			PreviousWorkerName: strPtr(w.PreviousWorkerName.String, w.PreviousWorkerName.Valid),
-			RenamedAt:          strPtr(w.RenamedAt.String, w.RenamedAt.Valid),
-			Plugins:            pluginsToSlice(w.Plugins.String),
-		})
+		items = append(items, workerListItemFromRow(w, ownerNames[w.OwnerUserID]))
 	}
 
 	writeJSON(w, http.StatusOK, workerListResponse{Items: items, Total: len(items)})
@@ -144,21 +161,12 @@ func (s *Server) handleGetWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workerListItem{
-		WorkerID:           worker.WorkerID,
-		WorkerName:         worker.WorkerName,
-		Hostname:           worker.Hostname,
-		OS:                 worker.OS,
-		Mode:               worker.Mode,
-		Capabilities:       capabilitiesToSlice(worker.Capabilities),
-		Workspace:          worker.Workspace,
-		Status:             worker.Status,
-		LastHeartbeat:      strPtr(worker.LastHeartbeat.String, worker.LastHeartbeat.Valid),
-		RegisteredAt:       strPtr(worker.RegisteredAt.String, worker.RegisteredAt.Valid),
-		PreviousWorkerName: strPtr(worker.PreviousWorkerName.String, worker.PreviousWorkerName.Valid),
-		RenamedAt:          strPtr(worker.RenamedAt.String, worker.RenamedAt.Valid),
-		Plugins:            pluginsToSlice(worker.Plugins.String),
-	})
+	owner, err := s.store.GetUserByID(worker.OwnerUserID)
+	if err != nil || owner == nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	writeJSON(w, http.StatusOK, workerListItemFromRow(worker, owner.Username))
 }
 
 func (s *Server) handlePatchWorker(w http.ResponseWriter, r *http.Request) {
@@ -271,10 +279,10 @@ func (s *Server) handleDeleteWorker(w http.ResponseWriter, r *http.Request) {
 	// Clean up in-memory state
 	s.challenges.RevokeWorker(workerID)
 	s.workerSessions.RevokeWorker(workerID)
-	s.workerBroker.DrainAndClose(workerID)
+	s.taskStore.BlockWorker(workerID)
 
 	// Notify dashboard — ownerID is captured from before revoke
-	s.dashBus.Publish(ownerID, "worker.revoked", map[string]string{
+	s.dashBus.PublishWorker(ownerID, "worker.revoked", map[string]string{
 		"worker_id": workerID,
 	})
 

@@ -14,6 +14,8 @@ type DashboardEvent struct {
 	Data  interface{} `json:"data"`
 }
 
+const AdminGlobalScope = "__admin_global__"
+
 // DashboardBus manages user-scoped event subscriptions for dashboard SSE.
 type DashboardBus struct {
 	mu          sync.RWMutex
@@ -92,8 +94,8 @@ func (b *DashboardBus) Unsubscribe(userID string, queue chan DashboardEvent) {
 	// The queue may already have been evicted and closed by Subscribe.
 }
 
-// Publish sends an event to all subscribers of a user.
-func (b *DashboardBus) Publish(userID, event string, data interface{}) {
+// Publish sends an event to all subscribers of one scope.
+func (b *DashboardBus) Publish(scope, event string, data interface{}) {
 	b.mu.Lock()
 
 	b.sequence++
@@ -105,14 +107,14 @@ func (b *DashboardBus) Publish(userID, event string, data interface{}) {
 	}
 
 	// Add to history
-	b.history[userID] = append(b.history[userID], evt)
-	if len(b.history[userID]) > b.maxHistory {
-		b.history[userID] = b.history[userID][1:]
+	b.history[scope] = append(b.history[scope], evt)
+	if len(b.history[scope]) > b.maxHistory {
+		b.history[scope] = b.history[scope][1:]
 	}
 
 	// Send while holding the lock so Unsubscribe cannot close a channel
 	// between selecting it and sending to it. Sends are non-blocking.
-	for _, ch := range b.subscribers[userID] {
+	for _, ch := range b.subscribers[scope] {
 		select {
 		case ch <- evt:
 		default:
@@ -121,13 +123,29 @@ func (b *DashboardBus) Publish(userID, event string, data interface{}) {
 	b.mu.Unlock()
 }
 
+// PublishWorker sends a Worker event to its owner and to the global admin scope.
+func (b *DashboardBus) PublishWorker(ownerUserID, event string, data interface{}) {
+	b.Publish(ownerUserID, event, data)
+	b.Publish(AdminGlobalScope, event, data)
+}
+
+// CloseScope disconnects every active subscriber for a scope.
+func (b *DashboardBus) CloseScope(scope string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.subscribers[scope] {
+		close(ch)
+	}
+	delete(b.subscribers, scope)
+}
+
 // PublishByWorker looks up the owner of a worker and publishes to that user.
 func (b *DashboardBus) PublishByWorker(workerID, event string, data interface{}, ownerFn func(workerID string) (string, error)) {
 	userID, err := ownerFn(workerID)
 	if err != nil || userID == "" {
 		return
 	}
-	b.Publish(userID, event, data)
+	b.PublishWorker(userID, event, data)
 }
 
 // MarshalDashboardEvent formats a DashboardEvent as SSE text.

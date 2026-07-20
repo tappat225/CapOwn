@@ -55,7 +55,7 @@ func (s *Store) RegisterWorker(
 	now := NowISO()
 	_, err := s.db.Exec(
 		`INSERT INTO workers (worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, registered_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?)`,
 		workerID, workerName, ownerUserID, publicKey, hostname, osName, mode, capabilities, workspace, now,
 	)
 	if err != nil {
@@ -173,22 +173,6 @@ func (s *Store) GetWorkerPlugins(workerID string) ([]domain.PluginInfo, error) {
 		return []domain.PluginInfo{}, nil
 	}
 	return result, nil
-}
-
-// SetOnline marks a worker as online and updates heartbeat without touching metadata.
-func (s *Store) SetOnline(workerID string) error {
-	now := NowISO()
-	_, err := s.db.Exec(
-		`UPDATE workers SET status = 'online', last_heartbeat = ? WHERE worker_id = ? AND revoked_at IS NULL`,
-		now, workerID)
-	return err
-}
-
-// Heartbeat updates the last_heartbeat timestamp.
-func (s *Store) Heartbeat(workerID string) error {
-	now := NowISO()
-	_, err := s.db.Exec(`UPDATE workers SET last_heartbeat = ? WHERE worker_id = ? AND revoked_at IS NULL`, now, workerID)
-	return err
 }
 
 // MarkOffline sets a worker's status to offline.

@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/capown/master/internal/auth"
-	"github.com/capown/master/internal/broker"
 	"github.com/capown/master/internal/config"
 	"github.com/capown/master/internal/domain"
 	"github.com/capown/master/internal/events"
 	"github.com/capown/master/internal/service"
 	"github.com/capown/master/internal/store"
 	"github.com/capown/master/internal/tasks"
+	"github.com/capown/master/internal/version"
 )
 
 // Server holds all dependencies for the HTTP API.
@@ -23,12 +24,13 @@ type Server struct {
 	store          *store.Store
 	challenges     *auth.ChallengeStore
 	workerSessions *auth.SessionStore
-	workerBroker   *broker.WorkerBroker
 	dashBus        *events.DashboardBus
 	mux            *http.ServeMux
 	srv            *http.Server
 	pwHashSem      chan struct{} // semaphore for password hashing concurrency
 	taskStore      *tasks.Store
+	shutdown       chan struct{}
+	shutdownOnce   sync.Once
 }
 
 // NewServer creates a new Server with all dependencies.
@@ -48,7 +50,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		time.Duration(cfg.Master.SessionTTL)*time.Second,
 		cfg.Master.MaxSessionStoreSize,
 	)
-	wb := broker.NewWorkerBroker(cfg.Master.MaxWorkerEventQueues, 64)
 	db := events.NewDashboardBus(64, cfg.Master.MaxDashboardSubscribers)
 	ts := tasks.NewStore()
 
@@ -57,11 +58,11 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		store:          st,
 		challenges:     cs,
 		workerSessions: ss,
-		workerBroker:   wb,
 		dashBus:        db,
 		mux:            http.NewServeMux(),
 		pwHashSem:      make(chan struct{}, cfg.Master.PasswordHashConcurrency),
 		taskStore:      ts,
+		shutdown:       make(chan struct{}),
 	}
 
 	s.registerRoutes()
@@ -82,7 +83,7 @@ func (s *Server) Handler() http.Handler {
 // Start begins the HTTP server and background jobs, blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	// Start background cleanup jobs
-	go service.RunWorkerSweeper(ctx, s.store, s.workerBroker, s.dashBus, s.config.Master.HeartbeatTimeout)
+	go service.RunWorkerSweeper(ctx, s.store, s.dashBus, s.taskStore, s.config.Master.HeartbeatTimeout)
 	go service.RunChallengeCleaner(ctx, s.challenges, 60*time.Second)
 	go service.RunSessionCleaner(ctx, s.workerSessions, 60*time.Second)
 	go service.RunExpiredSessionCleaner(ctx, s.store, 5*time.Minute)
@@ -92,7 +93,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:         s.config.Master.Addr(),
 		Handler:      s.Handler(),
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 0, // 0 = no timeout — required for SSE long-lived connections
+		WriteTimeout: 0, // 0 = no timeout; dashboard SSE and worker long-polls are long-lived
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -107,6 +108,7 @@ func (s *Server) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Graceful shutdown
+		s.signalShutdown()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return s.srv.Shutdown(shutdownCtx)
@@ -117,7 +119,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.signalShutdown()
 	return s.srv.Shutdown(ctx)
+}
+
+func (s *Server) signalShutdown() {
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
 }
 
 // registerRoutes sets up all HTTP routes.
@@ -125,6 +132,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("POST /mcp", s.handleMCP)
+	s.mux.HandleFunc("GET /mcp", s.handleMCPMethodNotAllowed)
 
 	// Auth routes
 	s.mux.HandleFunc("POST /v1/auth/register", s.handleRegister)
@@ -136,6 +145,7 @@ func (s *Server) registerRoutes() {
 	// Token routes
 	s.mux.HandleFunc("GET /v1/tokens", s.handleListTokens)
 	s.mux.HandleFunc("POST /v1/tokens", s.handleCreateToken)
+	s.mux.HandleFunc("PATCH /v1/tokens/{token_id}", s.handlePatchToken)
 	s.mux.HandleFunc("DELETE /v1/tokens/{token_id}", s.handleDeleteToken)
 
 	// Worker registration token routes
@@ -150,7 +160,6 @@ func (s *Server) registerRoutes() {
 
 	// Worker management routes
 	s.mux.HandleFunc("PUT /v1/workers/{worker_id}/runtime", s.handleUpdateRuntime)
-	s.mux.HandleFunc("GET /v1/workers/{worker_id}/events", s.handleWorkerEvents)
 	s.mux.HandleFunc("GET /v1/workers/{worker_id}", s.handleGetWorker)
 	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}", s.handlePatchWorker)
 	s.mux.HandleFunc("DELETE /v1/workers/{worker_id}", s.handleDeleteWorker)
@@ -158,6 +167,10 @@ func (s *Server) registerRoutes() {
 
 	// Plugin routes
 	s.mux.HandleFunc("GET /v1/workers/{worker_id}/plugins", s.handleListWorkerPlugins)
+	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}/plugins/{plugin_id}", s.handleSetWorkerPluginEnabled)
+
+	// Worker job claim (long-poll)
+	s.mux.HandleFunc("POST /v1/workers/{worker_id}/jobs/claim", s.handleClaimJobs)
 
 	// Task routes
 	s.mux.HandleFunc("POST /v1/tasks", s.handleDispatchTask)
@@ -173,6 +186,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/admin/users", s.handleAdminCreateUser)
 	s.mux.HandleFunc("GET /v1/admin/users/{username}", s.handleAdminGetUser)
 	s.mux.HandleFunc("PATCH /v1/admin/users/{username}", s.handleAdminPatchUser)
+	s.mux.HandleFunc("DELETE /v1/admin/users/{username}", s.handleAdminDeleteUser)
+	s.mux.HandleFunc("GET /v1/admin/invitations", s.handleAdminListInvitations)
+	s.mux.HandleFunc("POST /v1/admin/invitations", s.handleAdminCreateInvitation)
+	s.mux.HandleFunc("DELETE /v1/admin/invitations/{invitation_id}", s.handleAdminRevokeInvitation)
 	s.mux.HandleFunc("GET /v1/admin/users/{username}/tokens", s.handleAdminListUserTokens)
 	s.mux.HandleFunc("POST /v1/admin/users/{username}/tokens", s.handleAdminCreateUserToken)
 	s.mux.HandleFunc("DELETE /v1/admin/tokens/{token_id}", s.handleAdminDeleteToken)
@@ -195,15 +212,18 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	initialized := s.store.CountUsers() > 0
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
-		Version:         "0.1.0",
-		ProtocolVersion: "1.1",
+		Version:         version.ProductVersion,
+		ProtocolVersion: version.ProtocolVersion,
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "ok",
+		"mcp_enabled": true,
+	})
 }
 
 // acquirePWHash acquires the password hashing semaphore.

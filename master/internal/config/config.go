@@ -33,10 +33,6 @@ type Section struct {
 	MaxChallengeStoreSize int `toml:"max_challenge_store_size"`
 	// MaxSessionStoreSize limits the number of active worker sessions.
 	MaxSessionStoreSize int `toml:"max_session_store_size"`
-	// MaxWorkerEventQueues limits the number of concurrent worker SSE channels.
-	MaxWorkerEventQueues int `toml:"max_worker_event_queues"`
-	// SSEMaxConnectionsPerWorker limits concurrent SSE connections per worker.
-	SSEMaxConnectionsPerWorker int `toml:"sse_max_connections_per_worker"`
 	// MaxDashboardSubscribers limits concurrent dashboard SSE subscribers per user.
 	MaxDashboardSubscribers int `toml:"max_dashboard_subscribers"`
 	// PasswordHashConcurrency limits simultaneous password hashing operations.
@@ -47,23 +43,21 @@ type Section struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Master: Section{
-			Host:                       "0.0.0.0",
-			Port:                       9210,
-			DBPath:                     "./data/master.db",
-			PublicURL:                  "",
-			HeartbeatTimeout:           60,
-			SessionTTL:                 28800,
-			ChallengeTTL:               300,
-			AllowedDashboardOrigins:    []string{},
-			RateLimit:                  10,
-			MaxBodyBytes:               65536,
-			LogLevel:                   "info",
-			MaxChallengeStoreSize:      1024,
-			MaxSessionStoreSize:        4096,
-			MaxWorkerEventQueues:       1024,
-			SSEMaxConnectionsPerWorker: 1,
-			MaxDashboardSubscribers:    64,
-			PasswordHashConcurrency:    2,
+			Host:                    "0.0.0.0",
+			Port:                    9230,
+			DBPath:                  "./data/master.db",
+			PublicURL:               "",
+			HeartbeatTimeout:        60,
+			SessionTTL:              28800,
+			ChallengeTTL:            300,
+			AllowedDashboardOrigins: []string{},
+			RateLimit:               10,
+			MaxBodyBytes:            65536,
+			LogLevel:                "info",
+			MaxChallengeStoreSize:   1024,
+			MaxSessionStoreSize:     4096,
+			MaxDashboardSubscribers: 64,
+			PasswordHashConcurrency: 2,
 		},
 	}
 }
@@ -128,7 +122,7 @@ func Load(path string) *Config {
 		cfg.Master.HeartbeatTimeout = 2
 	}
 	if cfg.Master.Port <= 0 || cfg.Master.Port > 65535 {
-		cfg.Master.Port = 9210
+		cfg.Master.Port = 9230
 	}
 	if cfg.Master.MaxBodyBytes < 1024 {
 		cfg.Master.MaxBodyBytes = 1024
@@ -147,9 +141,6 @@ func Load(path string) *Config {
 	}
 	if cfg.Master.SessionTTL < 60 {
 		cfg.Master.SessionTTL = 60
-	}
-	if cfg.Master.MaxWorkerEventQueues < 1 {
-		cfg.Master.MaxWorkerEventQueues = 1
 	}
 	if cfg.Master.MaxDashboardSubscribers < 1 {
 		cfg.Master.MaxDashboardSubscribers = 1

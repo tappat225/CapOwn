@@ -2,7 +2,7 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-> Status: Adopted in protocol v1.2. This document describes the plugin
+> Status: Adopted in the current `/v1` contract. This document describes the plugin
 > extension that is now part of the canonical OpenAPI contract.
 
 ## 1. Purpose and boundary
@@ -159,6 +159,17 @@ The Worker MAY restart an unhealthy plugin, but restart attempts MUST be
 bounded. A restart MUST NOT silently change the plugin ID, version, command,
 permissions, or discovered tool schema.
 
+The Master may request an owner-authorized `enabled` state change through the
+Worker task claim channel. The Worker atomically persists the boolean in the
+existing local JSON manifest before applying the lifecycle transition. This
+control cannot install a plugin or modify its command, environment variables,
+permissions, limits, or other manifest fields.
+
+Enabling starts and initializes the plugin. A failed start keeps
+`enabled: true` and reports `status: error`. Disabling rejects new calls,
+cancels active calls, stops the process, and reports `status: disabled`.
+Repeating the requested state is idempotent.
+
 ## 5. Discovered plugin information
 
 The Worker reports only the following sanitized information to the Master:
@@ -217,22 +228,37 @@ Plugin calls use the `plugin_call` task type dispatched through
 }
 ```
 
-The Master resolves the target Worker and verifies ownership before sending
+The Master resolves the target Worker and verifies ownership before enqueueing
 the task. The Master treats `plugin_id`, `tool_name`, and `arguments` as
 untrusted input. It MUST NOT accept a command, executable path, or environment
 override in this envelope.
 
-The Worker dispatches the task via an SSE `task` event. The SSE data
-contains:
+The Worker claims jobs via long-poll:
+
+```http
+POST /v1/workers/{worker_id}/jobs/claim?limit=1&wait_seconds=25
+```
+
+A claimed work job looks like:
 
 ```json
 {
+  "job_type": "task",
+  "delivery_id": "job_0123456789abcdef01234567",
   "task_id": "tsk_0123456789abcdef01234567",
   "task_type": "plugin_call",
   "params": { ... },
   "timeout_seconds": 60
 }
 ```
+
+Claiming a `task` job creates a short delivery lease. The task remains
+`pending` until the Worker reports `status: running` with the claimed
+`delivery_id`; the Worker MUST send that confirmation before invoking the
+plugin and reuse that identifier for later results. If confirmation is not received,
+the Master makes the task claimable again. Worker liveness is reported
+independently through the runtime heartbeat. Workers MUST treat claim as the
+source of truth for all task and cancel delivery.
 
 The Worker MUST reject:
 
@@ -310,10 +336,23 @@ secrets.
 
 ## 9. Cancellation and failure semantics
 
-Cancellation is best-effort. The Worker SHOULD use the MCP cancellation
-mechanism when supported. If the underlying plugin cannot safely cancel an
-in-flight call, the Worker MAY terminate and restart the plugin session, then
-return `plugin_canceled`.
+Cancellation is best-effort and uses the same claim path as work:
+
+- A `pending` task is marked `canceled` immediately and removed from the queue.
+- A `running` task receives a claimable cancel job:
+
+```json
+{
+  "job_type": "cancel",
+  "task_id": "tsk_0123456789abcdef01234567"
+}
+```
+
+The Worker SHOULD abort the matching active invocation and report a terminal
+result (typically `canceled` / `plugin_canceled`). The Worker SHOULD use the
+MCP cancellation mechanism when supported. If the underlying plugin cannot
+safely cancel an in-flight call, the Worker MAY terminate and restart the
+plugin session, then return `plugin_canceled`.
 
 The following transitions are valid:
 
@@ -322,11 +361,14 @@ pending → running → completed
 pending → running → failed
 pending → running → timeout
 pending → running → canceled
+pending → canceled
 ```
 
-If the Worker disconnects after receiving a task, it MUST NOT claim success
-without a result. The Master and Client need a later task-history policy to
-distinguish an unknown result from a failed result after process restart.
+`pending → running` occurs when the Worker confirms a claimed job through the
+task-result endpoint. If delivery is interrupted before that confirmation, the
+Master requeues the task after the delivery lease expires. If a confirmed
+Worker later becomes stale, the Master may recover its non-terminal work for
+redelivery; a Worker MUST NOT claim success without a result.
 
 ## 10. Security requirements
 
@@ -342,16 +384,17 @@ distinguish an unknown result from a failed result after process restart.
   specified sandbox implementation; manifest declarations alone are not a
   sandbox.
 
-## 11. Compatibility and future extension
+## 11. Future extension
 
-The plugin and task schemas are now part of `protocol/openapi.yaml` (v1.2).
+The plugin and task schemas are part of the current `/v1` contract in
+`protocol/openapi.yaml`.
 The implementation work follows:
 
 1. Go Master: task routing, plugin/task API handlers, and result correlation;
-2. TypeScript Worker: plugin runtime, task event handling, result reporting;
+2. TypeScript Worker: plugin runtime, job claim handling, result reporting;
 3. Python REST Client: task and plugin methods;
 4. Fake MCP plugin for end-to-end tests.
 
 The first interoperable plugin profile is `mcp-stdio-v1`. A future transport
-or content profile MUST use explicit version negotiation rather than silently
-changing the meaning of this profile.
+or content profile must update the current `/v1` contract and all in-tree
+implementations together.

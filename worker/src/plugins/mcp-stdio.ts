@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { createInterface } from "node:readline";
 import { EventEmitter } from "node:events";
-import type { PluginManifest, PluginToolInfo, McpJsonRpcRequest, McpJsonRpcResponse, McpTool, McpCallToolResult, PluginInfo, PluginStatus } from "./types.js";
+import type {
+  PluginManifest,
+  PluginToolInfo,
+  McpJsonRpcRequest,
+  McpJsonRpcResponse,
+  McpTool,
+  McpCallToolResult,
+  PluginInfo,
+  PluginStatus,
+} from "./types.js";
 import { PluginError, PluginErrorCodes } from "./errors.js";
+import { PRODUCT_VERSION } from "../generated/version.js";
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -19,8 +33,23 @@ export interface McpAdapterEvents {
 }
 
 export declare interface McpStdioAdapter {
-  on<U extends keyof McpAdapterEvents>(event: U, listener: McpAdapterEvents[U]): this;
-  emit<U extends keyof McpAdapterEvents>(event: U, ...args: Parameters<McpAdapterEvents[U]>): boolean;
+  on<U extends keyof McpAdapterEvents>(
+    event: U,
+    listener: McpAdapterEvents[U],
+  ): this;
+  emit<U extends keyof McpAdapterEvents>(
+    event: U,
+    ...args: Parameters<McpAdapterEvents[U]>
+  ): boolean;
+}
+
+export function mcpStdioSpawnOptions(env: NodeJS.ProcessEnv): SpawnOptions {
+  return {
+    stdio: ["pipe", "pipe", "pipe"],
+    env,
+    shell: false,
+    windowsHide: true,
+  };
 }
 
 export class McpStdioAdapter extends EventEmitter {
@@ -76,11 +105,7 @@ export class McpStdioAdapter extends EventEmitter {
     }
     Object.assign(env, this.manifest.env);
 
-    this.proc = spawn(cmd, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      env,
-      shell: false,
-    });
+    this.proc = spawn(cmd, args, mcpStdioSpawnOptions(env));
 
     if (this.proc.stderr) {
       // Drain stderr without retaining or logging potentially sensitive output.
@@ -88,7 +113,10 @@ export class McpStdioAdapter extends EventEmitter {
     }
 
     if (this.proc.stdout) {
-      this.rl = createInterface({ input: this.proc.stdout, crlfDelay: Infinity });
+      this.rl = createInterface({
+        input: this.proc.stdout,
+        crlfDelay: Infinity,
+      });
       this.rl.on("line", (line: string) => this.handleLine(line));
     }
 
@@ -101,16 +129,23 @@ export class McpStdioAdapter extends EventEmitter {
     });
 
     try {
-      await this.sendRequest("initialize", {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "capown-worker", version: "0.1.0" },
-      }, this.manifest.limits?.startup_timeout_seconds ?? 15);
+      await this.sendRequest(
+        "initialize",
+        {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "capown-worker", version: PRODUCT_VERSION },
+        },
+        this.manifest.limits?.startup_timeout_seconds ?? 15,
+      );
 
       this.sendNotification("notifications/initialized", {});
 
-      const toolsResult = await this.sendRequest("tools/list", {},
-        this.manifest.limits?.startup_timeout_seconds ?? 15);
+      const toolsResult = await this.sendRequest(
+        "tools/list",
+        {},
+        this.manifest.limits?.startup_timeout_seconds ?? 15,
+      );
 
       this._tools = this.parseTools(toolsResult);
       this._status = "running";
@@ -137,52 +172,74 @@ export class McpStdioAdapter extends EventEmitter {
     signal?: AbortSignal,
   ): Promise<McpCallToolResult> {
     if (this._status !== "running") {
-      throw new PluginError(PluginErrorCodes.PluginUnavailable, `plugin ${this.pluginId} is not running`);
+      throw new PluginError(
+        PluginErrorCodes.PluginUnavailable,
+        `plugin ${this.pluginId} is not running`,
+      );
     }
 
     const maxConcurrency = this.manifest.limits?.max_concurrency ?? 4;
     if (this.activeCalls >= maxConcurrency) {
-      throw new PluginError(PluginErrorCodes.PluginConcurrencyExceeded,
-        `plugin ${this.pluginId} concurrency limit (${maxConcurrency}) reached`);
+      throw new PluginError(
+        PluginErrorCodes.PluginConcurrencyExceeded,
+        `plugin ${this.pluginId} concurrency limit (${maxConcurrency}) reached`,
+      );
     }
 
     const tool = this._tools.find((t) => t.name === toolName);
     if (!tool) {
-      throw new PluginError(PluginErrorCodes.PluginToolNotFound,
-        `tool "${toolName}" not found in plugin ${this.pluginId}`);
+      throw new PluginError(
+        PluginErrorCodes.PluginToolNotFound,
+        `tool "${toolName}" not found in plugin ${this.pluginId}`,
+      );
     }
 
     const configuredTimeout = this.manifest.limits?.call_timeout_seconds ?? 60;
-    const timeout = Math.min(timeoutSeconds ?? configuredTimeout, configuredTimeout);
-    const maxArgumentBytes = this.manifest.limits?.max_argument_bytes ?? 200_000;
+    const timeout = Math.min(
+      timeoutSeconds ?? configuredTimeout,
+      configuredTimeout,
+    );
+    const maxArgumentBytes =
+      this.manifest.limits?.max_argument_bytes ?? 200_000;
     const maxOutputBytes = this.manifest.limits?.max_output_bytes ?? 200_000;
 
     // Enforce max_argument_bytes
     const argsSerialized = JSON.stringify(args);
     if (Buffer.byteLength(argsSerialized, "utf-8") > maxArgumentBytes) {
-      throw new PluginError(PluginErrorCodes.PluginSchemaInvalid,
-        `arguments exceed ${maxArgumentBytes} bytes`);
+      throw new PluginError(
+        PluginErrorCodes.PluginSchemaInvalid,
+        `arguments exceed ${maxArgumentBytes} bytes`,
+      );
     }
 
     this.activeCalls++;
     try {
-      const result = await this.sendRequest("tools/call", {
-        name: toolName,
-        arguments: args,
-      }, timeout, signal) as McpCallToolResult;
+      const result = (await this.sendRequest(
+        "tools/call",
+        {
+          name: toolName,
+          arguments: args,
+        },
+        timeout,
+        signal,
+      )) as McpCallToolResult;
 
       // Check output size (UTF-8 byte length)
       const serialized = JSON.stringify(result);
       if (Buffer.byteLength(serialized, "utf-8") > maxOutputBytes) {
-        throw new PluginError(PluginErrorCodes.PluginOutputTooLarge,
-          `plugin ${this.pluginId} output exceeds ${maxOutputBytes} bytes`);
+        throw new PluginError(
+          PluginErrorCodes.PluginOutputTooLarge,
+          `plugin ${this.pluginId} output exceeds ${maxOutputBytes} bytes`,
+        );
       }
 
       return result;
     } catch (err) {
       if (err instanceof PluginError) throw err;
-      throw new PluginError(PluginErrorCodes.PluginProtocolError,
-        `invocation failed: ${(err as Error).message}`);
+      throw new PluginError(
+        PluginErrorCodes.PluginProtocolError,
+        `invocation failed: ${(err as Error).message}`,
+      );
     } finally {
       this.activeCalls--;
     }
@@ -194,6 +251,7 @@ export class McpStdioAdapter extends EventEmitter {
       version: this.manifest.version,
       kind: this.manifest.kind,
       transport: this.manifest.transport,
+      enabled: this.manifest.enabled,
       status: this.status,
       tools: this._tools,
       error: this._error,
@@ -226,8 +284,12 @@ export class McpStdioAdapter extends EventEmitter {
         } catch {
           // The process may already have exited.
         }
-        reject(new PluginError(PluginErrorCodes.PluginTimeout,
-          `MCP request "${method}" timed out after ${timeoutSeconds}s`));
+        reject(
+          new PluginError(
+            PluginErrorCodes.PluginTimeout,
+            `MCP request "${method}" timed out after ${timeoutSeconds}s`,
+          ),
+        );
       }, timeoutSeconds * 1000);
 
       const pending: PendingRequest = { resolve, reject, timer, signal };
@@ -242,8 +304,12 @@ export class McpStdioAdapter extends EventEmitter {
           } catch {
             // The process may already have exited.
           }
-          reject(new PluginError(PluginErrorCodes.PluginCanceled,
-            `MCP request "${method}" was canceled`));
+          reject(
+            new PluginError(
+              PluginErrorCodes.PluginCanceled,
+              `MCP request "${method}" was canceled`,
+            ),
+          );
         };
         signal.addEventListener("abort", pending.abortHandler, { once: true });
       }
@@ -258,13 +324,20 @@ export class McpStdioAdapter extends EventEmitter {
         this.writeLine(JSON.stringify(request));
       } catch (err) {
         this.removePending(id, pending);
-        reject(new PluginError(PluginErrorCodes.PluginProtocolError,
-          `failed to write request: ${(err as Error).message}`));
+        reject(
+          new PluginError(
+            PluginErrorCodes.PluginProtocolError,
+            `failed to write request: ${(err as Error).message}`,
+          ),
+        );
       }
     });
   }
 
-  private sendNotification(method: string, params: Record<string, unknown>): void {
+  private sendNotification(
+    method: string,
+    params: Record<string, unknown>,
+  ): void {
     this.writeLine(JSON.stringify({ jsonrpc: "2.0", method, params }));
   }
 
@@ -289,8 +362,12 @@ export class McpStdioAdapter extends EventEmitter {
     if (Buffer.byteLength(line, "utf-8") > maxOutputBytes) {
       for (const [id, pending] of this.pending) {
         this.removePending(id, pending);
-        pending.reject(new PluginError(PluginErrorCodes.PluginOutputTooLarge,
-          `plugin ${this.pluginId} output exceeds ${maxOutputBytes} bytes`));
+        pending.reject(
+          new PluginError(
+            PluginErrorCodes.PluginOutputTooLarge,
+            `plugin ${this.pluginId} output exceeds ${maxOutputBytes} bytes`,
+          ),
+        );
       }
       this.setError("plugin output exceeded its configured limit");
       this.kill();
@@ -312,15 +389,24 @@ export class McpStdioAdapter extends EventEmitter {
     this.removePending(response.id, pending);
 
     if (response.jsonrpc !== "2.0") {
-      pending.reject(new PluginError(PluginErrorCodes.PluginProtocolError,
-        "MCP response has an invalid jsonrpc version",
-        "plugin returned an invalid protocol response"));
+      pending.reject(
+        new PluginError(
+          PluginErrorCodes.PluginProtocolError,
+          "MCP response has an invalid jsonrpc version",
+          "plugin returned an invalid protocol response",
+        ),
+      );
       return;
     }
 
     if (response.error) {
-      pending.reject(new PluginError(PluginErrorCodes.PluginProtocolError,
-        `MCP error: ${response.error.message}`, "plugin returned an MCP error"));
+      pending.reject(
+        new PluginError(
+          PluginErrorCodes.PluginProtocolError,
+          `MCP error: ${response.error.message}`,
+          "plugin returned an MCP error",
+        ),
+      );
     } else {
       pending.resolve(response.result);
     }
@@ -329,8 +415,12 @@ export class McpStdioAdapter extends EventEmitter {
   private handleExit(code: number | null, signal: string | null): void {
     for (const [id, pending] of this.pending) {
       this.removePending(id, pending);
-      pending.reject(new PluginError(PluginErrorCodes.PluginUnavailable,
-        "plugin process exited"));
+      pending.reject(
+        new PluginError(
+          PluginErrorCodes.PluginUnavailable,
+          "plugin process exited",
+        ),
+      );
     }
     this.pending.clear();
     this.rl?.close();
@@ -362,16 +452,26 @@ export class McpStdioAdapter extends EventEmitter {
 
     return tools.map((value: unknown) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new PluginError(PluginErrorCodes.PluginProtocolError,
-          "tools/list returned an invalid tool");
+        throw new PluginError(
+          PluginErrorCodes.PluginProtocolError,
+          "tools/list returned an invalid tool",
+        );
       }
       const tool = value as McpTool;
-      if (typeof tool.name !== "string" || tool.name.length === 0
-        || (tool.description !== undefined && typeof tool.description !== "string")
-        || (tool.inputSchema !== undefined
-          && (!tool.inputSchema || typeof tool.inputSchema !== "object" || Array.isArray(tool.inputSchema)))) {
-        throw new PluginError(PluginErrorCodes.PluginProtocolError,
-          "tools/list returned invalid tool metadata");
+      if (
+        typeof tool.name !== "string" ||
+        tool.name.length === 0 ||
+        (tool.description !== undefined &&
+          typeof tool.description !== "string") ||
+        (tool.inputSchema !== undefined &&
+          (!tool.inputSchema ||
+            typeof tool.inputSchema !== "object" ||
+            Array.isArray(tool.inputSchema)))
+      ) {
+        throw new PluginError(
+          PluginErrorCodes.PluginProtocolError,
+          "tools/list returned invalid tool metadata",
+        );
       }
       return {
         name: tool.name,
@@ -389,8 +489,12 @@ export class McpStdioAdapter extends EventEmitter {
 
     for (const [id, pending] of this.pending) {
       this.removePending(id, pending);
-      pending.reject(new PluginError(PluginErrorCodes.PluginCanceled,
-        "plugin session terminated"));
+      pending.reject(
+        new PluginError(
+          PluginErrorCodes.PluginCanceled,
+          "plugin session terminated",
+        ),
+      );
     }
     this.pending.clear();
     this.rl?.close();
@@ -401,7 +505,11 @@ export class McpStdioAdapter extends EventEmitter {
       proc.kill("SIGTERM");
       setTimeout(() => {
         if (proc.exitCode === null && proc.signalCode === null) {
-          try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+            /* ignore */
+          }
         }
       }, 5000);
       this.proc = null;

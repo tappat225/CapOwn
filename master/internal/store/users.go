@@ -147,7 +147,7 @@ func (s *Store) SetUserRole(userID, role string) error {
 // SetUserStatus enables or disables a user.
 func (s *Store) SetUserStatus(userID, status string) error {
 	now := NowISO()
-	if status == "disabled" {
+	if status != "active" {
 		_, err := s.db.Exec(`UPDATE users SET status = ?, disabled_at = ? WHERE user_id = ?`,
 			status, now, userID)
 		return err

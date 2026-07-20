@@ -80,6 +80,8 @@ func (s *Store) initDB() error {
 			name         TEXT NOT NULL DEFAULT '',
 			created_at   TEXT NOT NULL,
 			last_used_at TEXT,
+			last_used_ip TEXT,
+			disabled_at  TEXT,
 			revoked_at   TEXT
 		)`,
 
@@ -96,6 +98,21 @@ func (s *Store) initDB() error {
 
 		`CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)`,
+
+		`CREATE TABLE IF NOT EXISTS user_invitations (
+			invitation_id TEXT PRIMARY KEY,
+			code_hash     TEXT NOT NULL UNIQUE,
+			code_prefix   TEXT NOT NULL,
+			label         TEXT NOT NULL DEFAULT '',
+			created_by    TEXT NOT NULL REFERENCES users(user_id),
+			created_at    TEXT NOT NULL,
+			expires_at    TEXT NOT NULL,
+			used_at       TEXT,
+			used_by       TEXT REFERENCES users(user_id),
+			revoked_at    TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_invitations_created_by ON user_invitations(created_by)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_invitations_expires_at ON user_invitations(expires_at)`,
 
 		`CREATE TABLE IF NOT EXISTS registration_tokens (
 			token_id     TEXT PRIMARY KEY,
@@ -121,7 +138,7 @@ func (s *Store) initDB() error {
 			mode TEXT DEFAULT 'container',
 			capabilities TEXT DEFAULT 'shell,file',
 			workspace TEXT DEFAULT '/workspace',
-			status TEXT DEFAULT 'online',
+			status TEXT DEFAULT 'offline',
 			last_heartbeat TEXT,
 			registered_at TEXT,
 			previous_worker_name TEXT,
@@ -151,19 +168,22 @@ func (s *Store) initDB() error {
 		}
 	}
 	for _, migration := range []struct {
+		table      string
 		column     string
 		definition string
 	}{
-		{"previous_worker_name", "TEXT"},
-		{"renamed_at", "TEXT"},
-		{"plugins", "TEXT NOT NULL DEFAULT ''"},
+		{"workers", "previous_worker_name", "TEXT"},
+		{"workers", "renamed_at", "TEXT"},
+		{"workers", "plugins", "TEXT NOT NULL DEFAULT ''"},
+		{"auth_tokens", "last_used_ip", "TEXT"},
+		{"auth_tokens", "disabled_at", "TEXT"},
 	} {
-		exists, err := s.columnExists("workers", migration.column)
+		exists, err := s.columnExists(migration.table, migration.column)
 		if err != nil {
 			return err
 		}
 		if !exists {
-			if _, err := s.db.Exec("ALTER TABLE workers ADD COLUMN " + migration.column + " " + migration.definition); err != nil {
+			if _, err := s.db.Exec("ALTER TABLE " + migration.table + " ADD COLUMN " + migration.column + " " + migration.definition); err != nil {
 				return err
 			}
 		}

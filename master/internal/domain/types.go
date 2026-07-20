@@ -30,6 +30,7 @@ type UserStatus string
 const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusDisabled UserStatus = "disabled"
+	UserStatusDeleted  UserStatus = "deleted"
 )
 
 type User struct {
@@ -290,6 +291,7 @@ type PluginCallResult struct {
 // TaskResult is submitted by the Worker to report task completion.
 type TaskResult struct {
 	TaskID      string            `json:"task_id"`
+	DeliveryID  string            `json:"delivery_id"`
 	WorkerID    string            `json:"worker_id"`
 	Status      TaskStatus        `json:"status"`
 	Result      *PluginCallResult `json:"result,omitempty"`
@@ -331,6 +333,7 @@ type PluginInfo struct {
 	Version   string           `json:"version"`
 	Kind      string           `json:"kind"`
 	Transport string           `json:"transport"`
+	Enabled   bool             `json:"enabled"`
 	Status    string           `json:"status"`
 	Tools     []PluginToolInfo `json:"tools"`
 	Error     string           `json:"error"`

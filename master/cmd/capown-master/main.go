@@ -10,6 +10,7 @@ import (
 
 	"github.com/capown/master/internal/config"
 	"github.com/capown/master/internal/httpapi"
+	"github.com/capown/master/internal/version"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("starting capown-master",
-		"version", "0.1.0",
+		"version", version.ProductVersion,
 		"addr", cfg.Master.Addr(),
 		"db", cfg.Master.DBPath,
 	)

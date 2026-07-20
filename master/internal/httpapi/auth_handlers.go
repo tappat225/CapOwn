@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,8 +13,9 @@ import (
 // --- Auth Handlers ---
 
 type registerRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	InvitationCode string `json:"invitation_code"`
 }
 
 type loginRequest struct {
@@ -49,11 +51,30 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Atomic: creates admin user, sets password, creates session in one transaction
-	userID, sessionToken, expiresAt, err := s.store.RegisterFirstUser(
-		req.Username, req.Password, s.config.Master.SessionTTL,
-	)
+	var userID, sessionToken, expiresAt string
+	var err error
+	if s.store.CountUsers() == 0 {
+		userID, sessionToken, expiresAt, err = s.store.RegisterFirstUser(
+			req.Username, req.Password, s.config.Master.SessionTTL,
+		)
+	} else {
+		if req.InvitationCode == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvitationInvalid, "invitation code is required")
+			return
+		}
+		userID, sessionToken, expiresAt, err = s.store.RegisterInvitedUser(
+			req.InvitationCode, req.Username, req.Password, s.config.Master.SessionTTL,
+		)
+	}
 	if err != nil {
+		if errors.Is(err, store.ErrInvitationInvalid) {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvitationInvalid, "invitation code is invalid or expired")
+			return
+		}
+		if errors.Is(err, store.ErrUsernameConflict) {
+			writeErrorCode(w, http.StatusConflict, domain.ErrConflict, "username already taken")
+			return
+		}
 		if err.Error() == "registration closed" {
 			writeError(w, domain.ErrRegistrationClosedResp)
 			return
@@ -95,8 +116,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusUnauthorized, domain.ErrUnauthorized, "invalid credentials")
 		return
 	}
-	if user.Status == "disabled" {
-		writeErrorCode(w, http.StatusForbidden, domain.ErrForbidden, "user is disabled")
+	if user.Status != "active" {
+		writeErrorCode(w, http.StatusForbidden, domain.ErrUserDisabled, "user is disabled")
 		return
 	}
 

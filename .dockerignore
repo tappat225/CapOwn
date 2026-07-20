@@ -1,0 +1,14 @@
+.git
+.gitignore
+.codex
+.claude
+.agents
+master/data
+master/.gocache
+worker
+tests
+protocol
+scripts
+README.md
+AGENTS.md
+VERSIONING.md

@@ -99,11 +99,11 @@ func (s *Server) handleCreateRegistration(w http.ResponseWriter, r *http.Request
 		"token_id":           token.TokenID,
 		"registration_token": plaintext,
 		"token_prefix":       token.TokenPrefix,
-		"scope":             token.Scope,
-		"expires_at":        token.ExpiresAt,
-		"max_uses":          token.MaxUses,
-		"label":             token.Label,
-		"created_at":        token.CreatedAt,
+		"scope":              token.Scope,
+		"expires_at":         token.ExpiresAt,
+		"max_uses":           token.MaxUses,
+		"label":              token.Label,
+		"created_at":         token.CreatedAt,
 	}
 
 	// Generate registration URL if public_url is configured.

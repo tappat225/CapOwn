@@ -12,6 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = $PSScriptRoot
 $MasterSrc = (Resolve-Path (Join-Path $ScriptDir "..\master")).Path
+$VersionManifest = (Resolve-Path (Join-Path $ScriptDir "..\version.json")).Path
 $CapownRoot = Join-Path $HOME ".capown"
 
 for ($i = 0; $i -lt $args.Count; $i++) {
@@ -59,13 +60,28 @@ if ($goMajor -lt 1 -or ($goMajor -eq 1 -and $goMinor -lt 23)) {
 Write-Output "Go:     $goVersionText"
 Write-Output ""
 
+Push-Location $MasterSrc
+try {
+    $ProductVersion = (& go run ./cmd/capown-version --manifest $VersionManifest --field product_version).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Unable to read product version" }
+    $ProtocolVersion = (& go run ./cmd/capown-version --manifest $VersionManifest --field protocol_version).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Unable to read protocol version" }
+} finally {
+    Pop-Location
+}
+
+Write-Output "Product: $ProductVersion"
+Write-Output "Protocol: $ProtocolVersion"
+Write-Output ""
+
 New-Item -ItemType Directory -Path (Join-Path $MasterDir "data") -Force | Out-Null
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 
 Write-Output "Building Master..."
 Push-Location $MasterSrc
 try {
-    & go build -o $BinaryFile ./cmd/capown-master
+    $ldflags = "-X github.com/capown/master/internal/version.ProductVersion=$ProductVersion -X github.com/capown/master/internal/version.ProtocolVersion=$ProtocolVersion"
+    & go build -ldflags $ldflags -o $BinaryFile ./cmd/capown-master
     if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 } finally {
     Pop-Location

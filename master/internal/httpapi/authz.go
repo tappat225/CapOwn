@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
@@ -16,6 +18,22 @@ type AuthContext struct {
 	Username  string
 	Role      string // "user" or "admin"
 	WorkerID  string // set for worker session tokens
+}
+
+// requestIP returns the peer address used for token usage auditing. The Master
+// does not trust forwarded headers because proxy trust is deployment-specific.
+func requestIP(r *http.Request) string {
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
+}
+
+func (s *Server) touchToken(r *http.Request, tokenID string) {
+	if err := s.store.TouchToken(tokenID, requestIP(r)); err != nil {
+		slog.Warn("could not record token usage", "token_id", tokenID, "error", err)
+	}
 }
 
 func (ctx *AuthContext) hasAdminScope() bool {
@@ -56,8 +74,8 @@ func (s *Server) resolveWebSession(r *http.Request) (*AuthContext, *domain.APIEr
 	if user == nil {
 		return nil, domain.NewAPIError(domain.ErrUnauthorized, "user not found", http.StatusUnauthorized)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 	return &AuthContext{
 		TokenType: "web",
@@ -103,12 +121,13 @@ func (s *Server) resolveAdminToken(r *http.Request) (*AuthContext, *domain.APIEr
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
 	if user.Role != "admin" {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "admin role required", http.StatusForbidden)
 	}
+	s.touchToken(r, tok.TokenID)
 
 	return &AuthContext{
 		TokenType: "admin",
@@ -176,9 +195,10 @@ func (s *Server) resolveClientAPI(r *http.Request) (*AuthContext, *domain.APIErr
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
+	s.touchToken(r, tok.TokenID)
 
 	return &AuthContext{
 		TokenType: tok.TokenType,
@@ -229,9 +249,10 @@ func (s *Server) resolveAPI(r *http.Request) (*AuthContext, *domain.APIError) {
 	if err != nil || user == nil {
 		return nil, domain.NewAPIError(domain.ErrForbidden, "user not found", http.StatusForbidden)
 	}
-	if user.Status == "disabled" {
-		return nil, domain.NewAPIError(domain.ErrForbidden, "user is disabled", http.StatusForbidden)
+	if user.Status != "active" {
+		return nil, domain.NewAPIError(domain.ErrUserDisabled, "user is disabled", http.StatusForbidden)
 	}
+	s.touchToken(r, tok.TokenID)
 
 	return &AuthContext{
 		TokenType: tok.TokenType,

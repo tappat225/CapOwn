@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Minimal CapOwn Next REST Client -- task and plugin operations.
 
-Standard-library only (urllib). Targets the v1.2 protocol.
+Standard-library only (urllib). Targets the v1.4 protocol.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any
 
 @dataclass
 class ClientConfig:
-    master_url: str = "http://localhost:9210"
+    master_url: str = "http://localhost:9230"
     client_token: str = ""
     request_timeout: int = 30
 

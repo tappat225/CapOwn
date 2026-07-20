@@ -13,6 +13,7 @@ import type {
   WorkerInfo,
   PluginInfoItem,
   TaskResultReport,
+  WorkerJobsResponse,
 } from "./protocol.js";
 
 // --------------------------------------------------------------------------
@@ -113,6 +114,8 @@ export interface RegisterResult {
   workerId: string;
   workerName: string;
 }
+
+export type TaskResultReportOutcome = "ok" | "retryable" | "rejected";
 
 export class MasterClient {
   private _sessionToken = "";
@@ -236,18 +239,22 @@ export class MasterClient {
   // Runtime metadata
   // ------------------------------------------------------------------
 
-  /** Report runtime metadata to the Master after reconnection.
+  /** Report runtime metadata and refresh the Worker's liveness heartbeat.
    *
    * Returns true on success. On 401/403, clears the session token
    * (caller should re-authenticate).
    */
-  async reportRuntime(workerId: string, plugins?: PluginInfoItem[]): Promise<boolean> {
+  async reportRuntime(
+    workerId: string,
+    plugins: PluginInfoItem[] = [],
+    capabilities: string[] = [],
+  ): Promise<boolean> {
     const platform = getPlatformInfo();
     const body: WorkerReconnectRequest = {
       hostname: platform.hostname,
       os: platform.os,
       mode: "capability",
-      capabilities: [],
+      capabilities,
       workspace: "",
       plugins,
     };
@@ -270,6 +277,63 @@ export class MasterClient {
   }
 
   // ------------------------------------------------------------------
+  // Job claim (long-poll)
+  // ------------------------------------------------------------------
+
+  /** Claim jobs for this worker. Supports long-poll via waitSeconds. */
+  async claimJobs(
+    workerId: string,
+    options: { limit?: number; waitSeconds?: number; signal?: AbortSignal } = {},
+  ): Promise<WorkerJobsResponse | null> {
+    const limit = options.limit ?? 1;
+    const waitSeconds = options.waitSeconds ?? 25;
+    const url = buildUrl(
+      this._opts.masterUrl,
+      "/v1/workers/" + encodeURIComponent(workerId) +
+        "/jobs/claim?limit=" + encodeURIComponent(String(limit)) +
+        "&wait_seconds=" + encodeURIComponent(String(waitSeconds)),
+    );
+
+    // Long-poll needs a timeout longer than wait_seconds.
+    const timeoutMs = Math.max(REQUEST_TIMEOUT_MS, (waitSeconds + 10) * 1000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onOuterAbort = (): void => controller.abort();
+    if (options.signal) {
+      if (options.signal.aborted) {
+        clearTimeout(timer);
+        return null;
+      }
+      options.signal.addEventListener("abort", onOuterAbort, { once: true });
+    }
+
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Cache-Control": "no-store",
+          Accept: "application/json",
+          ...this._authHeaders(),
+        },
+        signal: controller.signal,
+      });
+      const text = await resp.text();
+      if (!resp.ok) {
+        if (resp.status === 401 || resp.status === 403) {
+          this._sessionToken = "";
+        }
+        return null;
+      }
+      return JSON.parse(text) as WorkerJobsResponse;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onOuterAbort);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Task result
   // ------------------------------------------------------------------
 
@@ -278,14 +342,30 @@ export class MasterClient {
    * Returns true on success.
    */
   async reportTaskResult(taskId: string, report: TaskResultReport): Promise<boolean> {
+    return (await this.reportTaskResultOutcome(taskId, report)) === "ok";
+  }
+
+  /** Report a task result and classify failures for durable retry handling. */
+  async reportTaskResultOutcome(
+    taskId: string,
+    report: TaskResultReport,
+  ): Promise<TaskResultReportOutcome> {
     const url = buildUrl(
       this._opts.masterUrl,
       "/v1/tasks/" + encodeURIComponent(taskId) + "/result",
     );
     const result = await doPut<{ status: string }>(url, report, this._authHeaders());
-    if (!result.ok && (result.status === 401 || result.status === 403)) {
-      this._sessionToken = "";
+    if (result.ok) {
+      return "ok";
     }
-    return result.ok;
+    if (result.status === 401 || result.status === 403) {
+      this._sessionToken = "";
+      return "retryable";
+    }
+    if (result.status === 0 || result.status === 408 || result.status === 425 ||
+        result.status === 429 || result.status >= 500) {
+      return "retryable";
+    }
+    return "rejected";
   }
 }

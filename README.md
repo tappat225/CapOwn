@@ -3,8 +3,8 @@
 
 Next generation of CapOwn core service. Components:
 
-- **`master/`** - Go HTTP API server (SQLite, Ed25519 auth, SSE)
-- **`worker/`** - TypeScript/Node Worker (connectivity-only milestone)
+- **`master/`** - Go HTTP API server (SQLite, Ed25519 auth, job claims, heartbeats)
+- **`worker/`** - TypeScript/Node Worker (job claims, plugin execution, heartbeats)
 - **`protocol/`** - Language-independent wire contract
 - **`scripts/`** - Installation helpers
 
@@ -30,7 +30,7 @@ docker compose up -d --build
 ```
 
 The default host port is `9230`. To choose another mapped host port, pass
-`MASTER_PORT`; the container continues to listen on `9210`:
+`MASTER_PORT`; the container continues to listen on `9230`:
 
 ```bash
 MASTER_PORT=9320 docker compose up -d --build

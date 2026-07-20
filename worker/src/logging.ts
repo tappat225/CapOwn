@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="node" />
-/** Structured ASCII-only logging for the Worker Next daemon. */
+/** Structured ASCII-only logging for Worker Next. */
 
 const enum Level {
   DEBUG = 0,

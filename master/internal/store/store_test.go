@@ -1,9 +1,11 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -92,6 +94,69 @@ func TestRegisterFirstUser(t *testing.T) {
 	}
 }
 
+func TestInvitationRegistrationIsSingleUseAndAtomic(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, invitation, err := s.CreateInvitation(adminID, "new teammate", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code == "" || invitation.CodeHash == code || invitation.CodePrefix == "" {
+		t.Fatal("invitation secret handling is invalid")
+	}
+
+	userID, session, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userID == "" || session == "" {
+		t.Fatal("invited registration did not create a user session")
+	}
+	user, err := s.GetUser("alice")
+	if err != nil || user == nil || user.Role != "user" {
+		t.Fatalf("unexpected invited user: %#v, %v", user, err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "bob", "secret1", 3600); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("reused invitation should fail, got %v", err)
+	}
+}
+
+func TestUsernameConflictDoesNotConsumeInvitation(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := s.CreateInvitation(adminID, "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "admin", "secret1", 3600); !errors.Is(err, ErrUsernameConflict) {
+		t.Fatalf("expected username conflict, got %v", err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600); err != nil {
+		t.Fatalf("invitation should remain usable after a rolled-back conflict: %v", err)
+	}
+}
+
+func TestExpiredInvitationIsRejected(t *testing.T) {
+	s := newTestStore(t)
+	adminID, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := s.CreateInvitation(adminID, "", -time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.RegisterInvitedUser(code, "alice", "secret1", 3600); !errors.Is(err, ErrInvitationInvalid) {
+		t.Fatalf("expired invitation should fail, got %v", err)
+	}
+}
+
 func TestRegisterFirstUserConcurrent(t *testing.T) {
 	s := newTestStore(t)
 	var wg sync.WaitGroup
@@ -162,6 +227,59 @@ func TestCreateAndValidateToken(t *testing.T) {
 	}
 	if validated == nil {
 		t.Error("token should be valid")
+	}
+}
+
+func TestClientTokenLifecycleAndUsageAudit(t *testing.T) {
+	s := newTestStore(t)
+
+	user, err := s.CreateUser("alice", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, token, err := s.CreateToken(user.UserID, "client", "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.TouchToken(token.TokenID, "203.0.113.42"); err != nil {
+		t.Fatal(err)
+	}
+	used, err := s.GetTokenByID(token.TokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !used.LastUsedAt.Valid || used.LastUsedIP.String != "203.0.113.42" {
+		t.Fatalf("usage audit not recorded: %#v", used)
+	}
+
+	if err := s.SetTokenDisabled(token.TokenID, true); err != nil {
+		t.Fatal(err)
+	}
+	if disabled, err := s.ValidateToken(plaintext); err != nil {
+		t.Fatal(err)
+	} else if disabled != nil {
+		t.Fatal("disabled token should not validate")
+	}
+
+	if err := s.SetTokenDisabled(token.TokenID, false); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := s.ValidateToken(plaintext); err != nil {
+		t.Fatal(err)
+	} else if enabled == nil {
+		t.Fatal("re-enabled token should validate")
+	}
+
+	if err := s.RevokeToken(token.TokenID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.ListOwnedClientTokens(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || !listed[0].RevokedAt.Valid {
+		t.Fatalf("revoked token should remain visible in client list: %#v", listed)
 	}
 }
 
@@ -263,10 +381,17 @@ func TestRenameAndRevokeWorkerAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	worker, err := s.GetActiveWorker(workerID)
+	if err != nil || worker == nil || worker.Status != "offline" || worker.LastHeartbeat.Valid {
+		t.Fatalf("new Worker should be offline before runtime heartbeat: %#v, %v", worker, err)
+	}
+	if _, becameOnline, err := s.ReconnectWorker(workerID, "host", "linux", "capability", "", "", "[]"); err != nil || !becameOnline {
+		t.Fatalf("runtime heartbeat should bring Worker online: became_online=%v err=%v", becameOnline, err)
+	}
 	if err := s.RenameWorkerAtomic(workerID, user.UserID, "worker.two"); err != nil {
 		t.Fatal(err)
 	}
-	worker, err := s.GetActiveWorker(workerID)
+	worker, err = s.GetActiveWorker(workerID)
 	if err != nil || worker == nil {
 		t.Fatalf("get renamed worker: %v", err)
 	}

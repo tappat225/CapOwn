@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/capown/master/internal/auth"
 	"github.com/capown/master/internal/domain"
@@ -51,7 +50,6 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
 	// Validate required fields
 	if req.RegistrationToken == "" {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "registration_token is required")
@@ -109,7 +107,7 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 	// Notify dashboard
 	owner, _ := s.store.GetOwner(workerID)
 	if owner != nil {
-		s.dashBus.Publish(owner.UserID, "worker.registered", map[string]interface{}{
+		s.dashBus.PublishWorker(owner.UserID, "worker.registered", map[string]interface{}{
 			"worker_id":   workerID,
 			"worker_name": req.WorkerName,
 		})
@@ -211,8 +209,8 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInternalResponse)
 		return
 	}
-	if ownerUser == nil || ownerUser.Status == "disabled" {
-		writeErrorCode(w, http.StatusForbidden, domain.ErrForbidden, "worker owner is disabled")
+	if ownerUser == nil || ownerUser.Status != "active" {
+		writeErrorCode(w, http.StatusForbidden, domain.ErrUserDisabled, "worker owner is disabled")
 		return
 	}
 
@@ -240,6 +238,10 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if req.Plugins == nil {
+		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugins is required")
+		return
+	}
 
 	capStr := strings.Join(req.Capabilities, ",")
 	mode := req.Mode
@@ -248,32 +250,31 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pluginsStr := ""
-	if req.Plugins != nil {
-		for _, plugin := range *req.Plugins {
-			if plugin.PluginID == "" || plugin.Version == "" || plugin.Kind == "" || plugin.Transport == "" {
-				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin metadata is incomplete")
-				return
-			}
-			switch plugin.Status {
-			case "starting", "running", "stopped", "error", "disabled":
-			default:
-				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid plugin status")
-				return
-			}
-			for _, tool := range plugin.Tools {
-				if tool.Name == "" {
-					writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin tool name is required")
-					return
-				}
-			}
-		}
-		encoded, err := json.Marshal(req.Plugins)
-		if err != nil {
-			writeError(w, domain.ErrInternalResponse)
+	for _, plugin := range *req.Plugins {
+		if plugin.PluginID == "" || plugin.Version == "" || plugin.Kind == "" || plugin.Transport == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin metadata is incomplete")
 			return
 		}
-		pluginsStr = string(encoded)
+		switch plugin.Status {
+		case "starting", "running", "stopped", "error", "disabled":
+		default:
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid plugin status")
+			return
+		}
+		for _, tool := range plugin.Tools {
+			if tool.Name == "" {
+				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin tool name is required")
+				return
+			}
+		}
 	}
+	encoded, err := json.Marshal(req.Plugins)
+	if err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	pluginsStr = string(encoded)
+	previousWorker, _ := s.store.GetActiveWorker(workerID)
 
 	_, becameOnline, err := s.store.ReconnectWorker(workerID, req.Hostname, req.OS, mode, capStr, req.Workspace, pluginsStr)
 	if err != nil {
@@ -283,94 +284,15 @@ func (s *Server) handleUpdateRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if becameOnline {
-		s.dashBus.Publish(ctx.UserID, "worker.online", map[string]string{
+		s.dashBus.PublishWorker(ctx.UserID, "worker.online", map[string]string{
+			"worker_id": workerID,
+		})
+	}
+	if previousWorker == nil || !previousWorker.Plugins.Valid || previousWorker.Plugins.String != pluginsStr {
+		s.dashBus.PublishWorker(ctx.UserID, "worker.plugins_updated", map[string]string{
 			"worker_id": workerID,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleWorkerEvents(w http.ResponseWriter, r *http.Request) {
-	workerID := r.PathValue("worker_id")
-
-	// Authenticate with worker session
-	ctx, apiErr := s.resolveWorkerSession(r, workerID)
-	if apiErr != nil {
-		writeError(w, apiErr)
-		return
-	}
-	if worker, err := s.store.GetActiveWorker(workerID); err != nil || worker == nil {
-		writeErrorCode(w, http.StatusNotFound, domain.ErrWorkerNotFound, "worker not found")
-		return
-	}
-
-	// Setup SSE
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeErrorCode(w, http.StatusInternalServerError, domain.ErrInternal, "streaming not supported")
-		return
-	}
-
-	ch, gen := s.workerBroker.Connect(workerID)
-	// Close the auth-to-connect race with administrative revocation. If the
-	// worker was revoked after authentication, remove this new broker entry.
-	if worker, err := s.store.GetActiveWorker(workerID); err != nil || worker == nil {
-		s.workerBroker.Disconnect(workerID, ch, gen)
-		writeErrorCode(w, http.StatusNotFound, domain.ErrWorkerNotFound, "worker not found")
-		return
-	}
-	defer func() {
-		// Only the current generation may transition the worker offline.
-		// A replaced or administratively closed stream must not overwrite
-		// the state of a newer connection.
-		if s.workerBroker.Disconnect(workerID, ch, gen) {
-			s.store.MarkOffline(workerID)
-			s.dashBus.Publish(ctx.UserID, "worker.offline", map[string]string{
-				"worker_id": workerID,
-			})
-		}
-	}()
-
-	// Mark worker online on SSE connect — only updates status/heartbeat, preserves runtime metadata
-	s.store.SetOnline(workerID)
-	s.dashBus.Publish(ctx.UserID, "worker.online", map[string]string{
-		"worker_id": workerID,
-	})
-
-	// Ping ticker every 30s
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-
-	// Channel to detect client disconnect
-	notify := r.Context().Done()
-
-	for {
-		select {
-		case <-notify:
-			return
-
-		case <-pingTicker.C:
-			// Send ping and heartbeat update
-			s.store.Heartbeat(workerID)
-			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
-
-		case evt, ok := <-ch:
-			if !ok {
-				return // channel closed
-			}
-			sseData, _ := json.Marshal(evt.Data)
-			if _, err := w.Write([]byte("event: " + evt.Event + "\ndata: " + string(sseData) + "\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
 }

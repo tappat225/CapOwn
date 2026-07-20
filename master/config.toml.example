@@ -6,13 +6,13 @@ role = "master"
 [master]
 # Network
 host = "0.0.0.0"
-port = 9210
+port = 9230
 
 # Database
 db_path = "./data/master.db"
 
 # Public URL (for dashboard redirects, optional)
-public_url = "http://localhost:9210"
+public_url = "http://localhost:9230"
 
 # Heartbeat timeout in seconds (workers marked offline after this)
 heartbeat_timeout = 60
@@ -37,7 +37,6 @@ log_level = "info"
 # In-memory store limits
 max_challenge_store_size = 1024
 max_session_store_size = 4096
-max_worker_event_queues = 1024
 max_dashboard_subscribers = 64
 
 # Password hashing concurrency limit
