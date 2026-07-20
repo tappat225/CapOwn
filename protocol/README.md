@@ -57,14 +57,24 @@ Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
 
 ## Versioning policy
 
-1. `/v1` is the only protocol prefix during this pre-user development stage.
-   Breaking changes update the current contract in place; do not add `/v2`,
-   compatibility shims, or parallel protocol implementations.
-2. `info.version` uses SemVer to identify the current contract. The Master,
-   Worker, and protocol definitions are updated together for each wire change.
-3. Every implementation MUST ignore unknown response fields and unknown SSE
+1. `/v1` is the only HTTP protocol prefix during this pre-user development
+   stage. It is a route namespace, not a promise that the SemVer major version
+   is stable. Breaking changes update the current contract in place; do not add
+   `/v2`, compatibility shims, or parallel protocol implementations.
+2. `info.version` uses SemVer for the protocol contract. The current `0.1.0`
+   version is the first pre-user baseline. Before `1.0.0`, protocol changes
+   may be breaking; use patch releases for documentation or compatible fixes
+   and minor releases for contract changes.
+3. Product and protocol versions are related but independent. A product
+   release MAY keep the same protocol version when its wire contract is
+   unchanged, and a protocol revision MAY advance independently when the
+   product release includes the change.
+4. The detailed versions `1.0.0` through `1.9.0` were internal exploratory
+   revisions and are not public compatibility targets; their history remains
+   available in Git.
+5. Every implementation MUST ignore unknown response fields and unknown SSE
    data fields.
-4. Current v1 request handlers reject unknown JSON fields. Clients MUST send
+6. Current v1 request handlers reject unknown JSON fields. Clients MUST send
    only fields defined for the current endpoint.
 
 ## Wire conventions

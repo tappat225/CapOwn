@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 1.9.0
+  version: 0.1.0
   description: |
-    Language-independent v1.9 wire contract for the CapOwn control plane.
+    Language-independent v0.1.0 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
@@ -13,7 +13,7 @@ info:
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "1.9"
+  x-capown-protocol-version: "0.1.0"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -1557,7 +1557,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "1.9"
+          const: "0.1.0"
         initialized:
           type: boolean
         capabilities:

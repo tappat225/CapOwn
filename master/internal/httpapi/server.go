@@ -212,7 +212,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
 		Version:         "0.1.0",
-		ProtocolVersion: "1.9",
+		ProtocolVersion: "0.1.0",
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})
