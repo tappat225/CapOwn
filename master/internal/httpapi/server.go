@@ -144,6 +144,7 @@ func (s *Server) registerRoutes() {
 	// Token routes
 	s.mux.HandleFunc("GET /v1/tokens", s.handleListTokens)
 	s.mux.HandleFunc("POST /v1/tokens", s.handleCreateToken)
+	s.mux.HandleFunc("PATCH /v1/tokens/{token_id}", s.handlePatchToken)
 	s.mux.HandleFunc("DELETE /v1/tokens/{token_id}", s.handleDeleteToken)
 
 	// Worker registration token routes
@@ -211,7 +212,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
 		Version:         "0.1.0",
-		ProtocolVersion: "1.8",
+		ProtocolVersion: "1.9",
 		Initialized:     initialized,
 		Capabilities:    []string{},
 	})

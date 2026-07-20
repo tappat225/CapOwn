@@ -16,6 +16,8 @@ type TokenRow struct {
 	Name        string
 	CreatedAt   string
 	LastUsedAt  sql.NullString
+	LastUsedIP  sql.NullString
+	DisabledAt  sql.NullString
 	RevokedAt   sql.NullString
 }
 
@@ -25,7 +27,8 @@ func scanToken(scanner interface {
 	t := &TokenRow{}
 	err := scanner.Scan(
 		&t.TokenID, &t.UserID, &t.TokenHash, &t.TokenPrefix,
-		&t.TokenType, &t.Name, &t.CreatedAt, &t.LastUsedAt, &t.RevokedAt,
+		&t.TokenType, &t.Name, &t.CreatedAt, &t.LastUsedAt,
+		&t.LastUsedIP, &t.DisabledAt, &t.RevokedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -75,7 +78,7 @@ func (s *Store) ValidateToken(token string) (*TokenRow, error) {
 	if t == nil {
 		return nil, nil
 	}
-	if t.RevokedAt.Valid {
+	if t.DisabledAt.Valid || t.RevokedAt.Valid {
 		return nil, nil
 	}
 	return t, nil
@@ -83,24 +86,24 @@ func (s *Store) ValidateToken(token string) (*TokenRow, error) {
 
 func (s *Store) getTokenByHash(hash string) (*TokenRow, error) {
 	row := s.db.QueryRow(
-		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, revoked_at
-		 FROM auth_tokens WHERE token_hash = ?`, hash)
+		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, last_used_ip, disabled_at, revoked_at
+			 FROM auth_tokens WHERE token_hash = ?`, hash)
 	return scanToken(row)
 }
 
 // GetTokenByID looks up a token by token_id.
 func (s *Store) GetTokenByID(tokenID string) (*TokenRow, error) {
 	row := s.db.QueryRow(
-		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, revoked_at
-		 FROM auth_tokens WHERE token_id = ?`, tokenID)
+		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, last_used_ip, disabled_at, revoked_at
+			 FROM auth_tokens WHERE token_id = ?`, tokenID)
 	return scanToken(row)
 }
 
 // ListUserTokens lists tokens for a user.
 func (s *Store) ListUserTokens(userID string) ([]*TokenRow, error) {
 	rows, err := s.db.Query(
-		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, revoked_at
-		 FROM auth_tokens WHERE user_id = ? ORDER BY created_at`, userID)
+		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, last_used_ip, disabled_at, revoked_at
+			 FROM auth_tokens WHERE user_id = ? ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,11 +120,12 @@ func (s *Store) ListUserTokens(userID string) ([]*TokenRow, error) {
 	return tokens, rows.Err()
 }
 
-// ListOwnedClientTokens lists non-revoked client tokens for a user.
+// ListOwnedClientTokens lists all client tokens for a user, including disabled
+// and revoked tokens so the Dashboard can show their lifecycle state.
 func (s *Store) ListOwnedClientTokens(userID string) ([]*TokenRow, error) {
 	rows, err := s.db.Query(
-		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, revoked_at
-		 FROM auth_tokens WHERE user_id = ? AND token_type = 'client' AND revoked_at IS NULL
+		`SELECT token_id, user_id, token_hash, token_prefix, token_type, name, created_at, last_used_at, last_used_ip, disabled_at, revoked_at
+		 FROM auth_tokens WHERE user_id = ? AND token_type = 'client'
 		 ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
@@ -164,10 +168,36 @@ func (s *Store) RevokeAllUserTokens(userID string) (int, error) {
 	return int(n), nil
 }
 
-// TouchToken updates last_used_at for a token.
-func (s *Store) TouchToken(tokenID string) error {
+// SetTokenDisabled updates the temporary disabled state of a token.
+func (s *Store) SetTokenDisabled(tokenID string, disabled bool) error {
+	var disabledAt interface{}
+	if disabled {
+		disabledAt = NowISO()
+	}
+	res, err := s.db.Exec(
+		`UPDATE auth_tokens SET disabled_at = ? WHERE token_id = ? AND revoked_at IS NULL`,
+		disabledAt,
+		tokenID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("token not found or already revoked")
+	}
+	return nil
+}
+
+// TouchToken updates last_used_at and last_used_ip for a token.
+func (s *Store) TouchToken(tokenID, ip string) error {
 	now := NowISO()
-	_, err := s.db.Exec(`UPDATE auth_tokens SET last_used_at = ? WHERE token_id = ?`, now, tokenID)
+	_, err := s.db.Exec(
+		`UPDATE auth_tokens SET last_used_at = ?, last_used_ip = ? WHERE token_id = ?`,
+		now,
+		ip,
+		tokenID,
+	)
 	return err
 }
 

@@ -230,6 +230,59 @@ func TestCreateAndValidateToken(t *testing.T) {
 	}
 }
 
+func TestClientTokenLifecycleAndUsageAudit(t *testing.T) {
+	s := newTestStore(t)
+
+	user, err := s.CreateUser("alice", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, token, err := s.CreateToken(user.UserID, "client", "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.TouchToken(token.TokenID, "203.0.113.42"); err != nil {
+		t.Fatal(err)
+	}
+	used, err := s.GetTokenByID(token.TokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !used.LastUsedAt.Valid || used.LastUsedIP.String != "203.0.113.42" {
+		t.Fatalf("usage audit not recorded: %#v", used)
+	}
+
+	if err := s.SetTokenDisabled(token.TokenID, true); err != nil {
+		t.Fatal(err)
+	}
+	if disabled, err := s.ValidateToken(plaintext); err != nil {
+		t.Fatal(err)
+	} else if disabled != nil {
+		t.Fatal("disabled token should not validate")
+	}
+
+	if err := s.SetTokenDisabled(token.TokenID, false); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := s.ValidateToken(plaintext); err != nil {
+		t.Fatal(err)
+	} else if enabled == nil {
+		t.Fatal("re-enabled token should validate")
+	}
+
+	if err := s.RevokeToken(token.TokenID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.ListOwnedClientTokens(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || !listed[0].RevokedAt.Valid {
+		t.Fatalf("revoked token should remain visible in client list: %#v", listed)
+	}
+}
+
 func TestCreateSessionAndValidate(t *testing.T) {
 	s := newTestStore(t)
 

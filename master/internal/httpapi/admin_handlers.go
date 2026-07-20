@@ -319,7 +319,10 @@ func (s *Server) handleAdminListUserTokens(w http.ResponseWriter, r *http.Reques
 		Name        string `json:"name"`
 		CreatedAt   string `json:"created_at"`
 		LastUsedAt  string `json:"last_used_at,omitempty"`
+		LastUsedIP  string `json:"last_used_ip,omitempty"`
+		DisabledAt  string `json:"disabled_at,omitempty"`
 		RevokedAt   string `json:"revoked_at,omitempty"`
+		Status      string `json:"status"`
 	}
 
 	views := make([]tokenView, 0, len(tokens))
@@ -330,9 +333,16 @@ func (s *Server) handleAdminListUserTokens(w http.ResponseWriter, r *http.Reques
 			TokenPrefix: t.TokenPrefix,
 			Name:        t.Name,
 			CreatedAt:   t.CreatedAt,
+			Status:      tokenStatus(t),
 		}
 		if t.LastUsedAt.Valid {
 			v.LastUsedAt = t.LastUsedAt.String
+		}
+		if t.LastUsedIP.Valid {
+			v.LastUsedIP = t.LastUsedIP.String
+		}
+		if t.DisabledAt.Valid {
+			v.DisabledAt = t.DisabledAt.String
 		}
 		if t.RevokedAt.Valid {
 			v.RevokedAt = t.RevokedAt.String

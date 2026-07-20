@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 1.8.0
+  version: 1.9.0
   description: |
-    Language-independent v1.8 wire contract for the CapOwn control plane.
+    Language-independent v1.9 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
@@ -13,7 +13,7 @@ info:
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "1.8"
+  x-capown-protocol-version: "1.9"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -386,6 +386,38 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
   /v1/tokens/{token_id}:
+    patch:
+      tags: [tokens]
+      summary: Enable or disable an owned client token
+      operationId: updateTokenStatus
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web]
+      parameters:
+        - $ref: '#/components/parameters/TokenId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTokenStatusRequest'
+      responses:
+        "200":
+          description: Updated token metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenView'
+        "400":
+          $ref: '#/components/responses/InvalidInput'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
     delete:
       tags: [tokens]
       summary: Revoke an owned token
@@ -1525,7 +1557,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "1.8"
+          const: "1.9"
         initialized:
           type: boolean
         capabilities:
@@ -1669,6 +1701,15 @@ components:
           type: string
           default: ""
 
+    UpdateTokenStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, disabled]
+
     CreatedToken:
       type: object
       additionalProperties: false
@@ -1692,7 +1733,7 @@ components:
     TokenView:
       type: object
       additionalProperties: false
-      required: [token_id, token_type, token_prefix, label, created_at, expires_at, last_used_at, revoked_at, status]
+      required: [token_id, token_type, token_prefix, label, created_at, expires_at, last_used_at, last_used_ip, disabled_at, revoked_at, status]
       properties:
         token_id:
           $ref: '#/components/schemas/ShortId'
@@ -1710,12 +1751,17 @@ components:
         last_used_at:
           type: [string, 'null']
           format: date-time
+        last_used_ip:
+          type: [string, 'null']
+        disabled_at:
+          type: [string, 'null']
+          format: date-time
         revoked_at:
           type: [string, 'null']
           format: date-time
         status:
           type: string
-          enum: [active, revoked]
+          enum: [active, disabled, revoked]
 
     TokenListResponse:
       type: object
@@ -2063,9 +2109,17 @@ components:
         last_used_at:
           type: [string, 'null']
           format: date-time
+        last_used_ip:
+          type: [string, 'null']
+        disabled_at:
+          type: [string, 'null']
+          format: date-time
         revoked_at:
           type: [string, 'null']
           format: date-time
+        status:
+          type: string
+          enum: [active, disabled, revoked]
 
     AdminCreatedToken:
       allOf:

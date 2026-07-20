@@ -2,6 +2,17 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+## 1.9.0 - 2026-07-19
+
+Added client-token lifecycle and usage auditing:
+
+- `PATCH /v1/tokens/{token_id}` enables or disables an owned client token.
+- Client token views include `last_used_ip` and `disabled_at` metadata.
+- Client token listing retains revoked entries so Dashboard users can review
+  the complete token lifecycle.
+- Successful client and admin bearer authentication records the request peer
+  IP and UTC last-use timestamp for the authenticated token.
+
 ## 1.8.0 - 2026-07-19
 
 Removed the Worker-specific SSE transport:

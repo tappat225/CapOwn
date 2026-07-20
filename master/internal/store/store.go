@@ -80,6 +80,8 @@ func (s *Store) initDB() error {
 			name         TEXT NOT NULL DEFAULT '',
 			created_at   TEXT NOT NULL,
 			last_used_at TEXT,
+			last_used_ip TEXT,
+			disabled_at  TEXT,
 			revoked_at   TEXT
 		)`,
 
@@ -166,19 +168,22 @@ func (s *Store) initDB() error {
 		}
 	}
 	for _, migration := range []struct {
+		table      string
 		column     string
 		definition string
 	}{
-		{"previous_worker_name", "TEXT"},
-		{"renamed_at", "TEXT"},
-		{"plugins", "TEXT NOT NULL DEFAULT ''"},
+		{"workers", "previous_worker_name", "TEXT"},
+		{"workers", "renamed_at", "TEXT"},
+		{"workers", "plugins", "TEXT NOT NULL DEFAULT ''"},
+		{"auth_tokens", "last_used_ip", "TEXT"},
+		{"auth_tokens", "disabled_at", "TEXT"},
 	} {
-		exists, err := s.columnExists("workers", migration.column)
+		exists, err := s.columnExists(migration.table, migration.column)
 		if err != nil {
 			return err
 		}
 		if !exists {
-			if _, err := s.db.Exec("ALTER TABLE workers ADD COLUMN " + migration.column + " " + migration.definition); err != nil {
+			if _, err := s.db.Exec("ALTER TABLE " + migration.table + " ADD COLUMN " + migration.column + " " + migration.definition); err != nil {
 				return err
 			}
 		}

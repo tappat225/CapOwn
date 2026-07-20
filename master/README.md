@@ -153,6 +153,7 @@ PATCH /v1/me/password     -- change password
 ```
 GET    /v1/tokens?type=client   -- list your tokens
 POST   /v1/tokens               -- create a token
+PATCH  /v1/tokens/{id}          -- enable or disable an owned client token
 DELETE /v1/tokens/{id}          -- revoke a token
 ```
 
