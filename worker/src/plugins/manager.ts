@@ -279,14 +279,17 @@ export class PluginManager {
     this.restartTimers.set(pluginId, timer);
   }
 
-  async install(params: InstallParams): Promise<PluginInfo> {
+  // Set of plugin IDs that are bundled and must not be uninstalled.
+  private static BUNDLED_PLUGIN_IDS = new Set(["filesystem"]);
+
+  async install(params: InstallParams, signal?: AbortSignal): Promise<PluginInfo> {
     const existing = this.registry.get(params.plugin_id);
     if (existing) {
       // Stop existing instance before reinstalling
       await existing.adapter.stop();
     }
 
-    const manifest = await installPlugin(this.configDir, params);
+    const manifest = await installPlugin(this.configDir, params, signal);
 
     // Unregister old entry if present
     if (existing) {
@@ -300,7 +303,13 @@ export class PluginManager {
     return entry.adapter.getInfo();
   }
 
-  async uninstall(params: UninstallParams): Promise<void> {
+  async uninstall(params: UninstallParams, _signal?: AbortSignal): Promise<void> {
+    if (PluginManager.BUNDLED_PLUGIN_IDS.has(params.plugin_id)) {
+      throw new PluginError(
+        PluginErrorCodes.PluginBundled,
+        `plugin "${params.plugin_id}" is bundled and cannot be uninstalled`,
+      );
+    }
     const plugin = this.registry.get(params.plugin_id);
     if (plugin) {
       await plugin.adapter.stop();

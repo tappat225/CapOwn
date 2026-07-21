@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, readlink, rename, rm, writeFile } from "node:fs/promises";
 import { get as httpsGet } from "node:https";
-import { get as httpGet } from "node:http";
-import { join } from "node:path";
+import type { IncomingMessage } from "node:http";
+import { join, isAbsolute, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { randomBytes } from "node:crypto";
 import { validateManifest } from "./manifest.js";
 import type { PluginManifest } from "./types.js";
 
@@ -24,6 +23,7 @@ export interface UninstallParams {
 }
 
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+const MAX_REDIRECTS = 3;
 
 /**
  * Download, verify, extract, and write the manifest for a plugin.
@@ -32,6 +32,7 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 export async function installPlugin(
   configDir: string,
   params: InstallParams,
+  signal?: AbortSignal,
 ): Promise<PluginManifest> {
   const { plugin_id: pluginId, package_url: packageUrl, sha256 } = params;
 
@@ -39,34 +40,46 @@ export async function installPlugin(
   const pluginsDir = join(configDir, "plugins.d");
   const workspacePath = join(configDir, "workspace");
 
-  // 1. Download to a temp file
+  enforceSecurePackageURL(packageUrl);
+  enforceSHA256(sha256);
+
+  if (signal?.aborted) {
+    throw new Error("install canceled");
+  }
+
   const tempDir = join(tmpdir(), `capown-install-${randomBytes(6).toString("hex")}`);
   await mkdir(tempDir, { recursive: true });
   const archivePath = join(tempDir, `${pluginId}.tar.gz`);
+  const extractDir = join(tempDir, "extract");
 
   try {
-    await downloadFile(packageUrl, archivePath);
+    await downloadFile(packageUrl, archivePath, signal);
 
-    // 2. Verify SHA-256
-    if (sha256) {
-      const fileBuffer = await readFile(archivePath);
-      const hash = createHash("sha256").update(fileBuffer).digest("hex");
-      if (hash !== sha256.toLowerCase()) {
-        throw new Error(
-          `sha256 mismatch: expected ${sha256}, got ${hash}`,
-        );
-      }
+    const fileBuffer = await readFile(archivePath);
+    const hash = createHash("sha256").update(fileBuffer).digest("hex");
+    if (hash !== sha256.toLowerCase()) {
+      throw new Error(`sha256 mismatch: expected ${sha256}, got ${hash}`);
     }
 
-    // 3. Extract into install directory
+    // Extract to a temp directory first, then validate members before promoting.
+    await mkdir(extractDir, { recursive: true, mode: 0o700 });
+    await extractTarGz(archivePath, extractDir, signal);
+    await assertNoPathTraversal(extractDir);
+
+    // Promote validated tree into the install directory.
+    // Prefer rename; fall back to recursive copy when volumes differ.
     await rm(installDir, { recursive: true, force: true });
-    await mkdir(installDir, { recursive: true, mode: 0o700 });
-    await extractTarGz(archivePath, installDir);
+    await mkdir(join(configDir, "plugins"), { recursive: true, mode: 0o700 });
+    try {
+      await rename(extractDir, installDir);
+    } catch {
+      await cp(extractDir, installDir, { recursive: true });
+      await rm(extractDir, { recursive: true, force: true });
+    }
 
-    // 4. Render manifest template
     const manifest = renderManifest(params.manifest, installDir, workspacePath);
+    enforceCommandPaths(manifest, installDir, workspacePath);
 
-    // 5. Write manifest to plugins.d
     await mkdir(pluginsDir, { recursive: true, mode: 0o700 });
     const manifestPath = join(pluginsDir, `${pluginId}.json`);
     const tempManifest = `${manifestPath}.tmp-${process.pid}`;
@@ -77,6 +90,10 @@ export async function installPlugin(
     await rename(tempManifest, manifestPath);
 
     return manifest;
+  } catch (err) {
+    // Clean partial install directory if promotion failed mid-way.
+    await rm(installDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -97,9 +114,6 @@ export async function uninstallPlugin(
   await rm(installDir, { recursive: true, force: true });
 }
 
-/**
- * Replace template variables in the manifest and validate it.
- */
 function renderManifest(
   template: Record<string, unknown>,
   installDir: string,
@@ -113,19 +127,115 @@ function renderManifest(
   return validateManifest(raw);
 }
 
+function enforceSecurePackageURL(url: string): void {
+  if (!url.startsWith("https://")) {
+    throw new Error("package_url must use HTTPS");
+  }
+}
+
+function enforceSHA256(sha256: string): void {
+  if (!sha256 || sha256.length !== 64 || !/^[0-9a-f]+$/i.test(sha256)) {
+    throw new Error("sha256 is required and must be a 64-character hex string");
+  }
+}
+
+function isInsideDir(root: string, target: string): boolean {
+  const normalizedRoot = resolve(root);
+  const normalizedTarget = resolve(target);
+  const rel = relative(normalizedRoot, normalizedTarget);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Walk the extracted tree and reject any member outside destDir.
+ * Also rejects symlink/junction members that would escape (via realpath-like resolve).
+ */
+async function assertNoPathTraversal(root: string): Promise<void> {
+  const walk = async (dir: string): Promise<void> => {
+    const children = await readdir(dir, { withFileTypes: true });
+    for (const child of children) {
+      const full = join(dir, child.name);
+      if (!isInsideDir(root, full)) {
+        throw new Error(`path traversal detected: ${full} is outside ${root}`);
+      }
+      if (child.isSymbolicLink()) {
+        // Resolve the link target relative to its parent and ensure it stays inside root.
+        const target = resolve(dir, await readlinkSafe(full));
+        if (!isInsideDir(root, target)) {
+          throw new Error(`symlink path traversal detected: ${full} -> ${target}`);
+        }
+      } else if (child.isDirectory()) {
+        await walk(full);
+      }
+    }
+  };
+  await walk(root);
+}
+
+async function readlinkSafe(path: string): Promise<string> {
+  return readlink(path);
+}
+
+/**
+ * Validate that path-like command arguments stay inside installDir or workspace.
+ * Interpreters without path separators (e.g. "node") are allowed as argv[0].
+ */
+function enforceCommandPaths(
+  manifest: PluginManifest,
+  installDir: string,
+  workspacePath: string,
+): void {
+  for (let i = 0; i < manifest.command.length; i++) {
+    const arg = manifest.command[i]!;
+    const looksLikePath =
+      arg.includes("/") || arg.includes("\\") || arg.startsWith(".") || isAbsolute(arg);
+
+    if (i === 0 && !looksLikePath) {
+      // PATH-resolvable interpreter name.
+      continue;
+    }
+    if (!looksLikePath) {
+      continue;
+    }
+
+    const resolved = resolve(arg);
+    if (isInsideDir(installDir, resolved) || isInsideDir(workspacePath, resolved)) {
+      continue;
+    }
+    throw new Error(
+      `command argument ${arg} must be inside install directory or workspace`,
+    );
+  }
+}
+
 /**
  * Download a file from an HTTPS URL to a local path.
+ * Redirect targets must also be HTTPS.
  */
-async function downloadFile(url: string, destPath: string): Promise<void> {
-  if (!url.startsWith("https://") && !url.startsWith("http://")) {
-    throw new Error("package_url must use http or https");
+async function downloadFile(
+  url: string,
+  destPath: string,
+  signal?: AbortSignal,
+  redirectsLeft: number = MAX_REDIRECTS,
+): Promise<void> {
+  if (!url.startsWith("https://")) {
+    throw new Error("package_url must use HTTPS");
+  }
+  if (signal?.aborted) {
+    throw new Error("download canceled");
   }
 
-  const get = url.startsWith("https://") ? httpsGet : httpGet;
+  return new Promise<void>((resolvePromise, reject) => {
+    let settled = false;
+    const finish = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (err) reject(err);
+      else resolvePromise();
+    };
 
-  return new Promise<void>((resolve, reject) => {
-    const request = get(url, (res) => {
-      // Follow redirects (up to 3)
+    const request = httpsGet(url, (res: IncomingMessage) => {
       if (
         res.statusCode &&
         res.statusCode >= 300 &&
@@ -133,13 +243,25 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
         res.headers.location
       ) {
         res.resume();
-        downloadFile(res.headers.location, destPath).then(resolve, reject);
+        if (redirectsLeft <= 0) {
+          finish(new Error("too many redirects"));
+          return;
+        }
+        const next = res.headers.location;
+        if (!next.startsWith("https://")) {
+          finish(new Error("redirect target must use HTTPS"));
+          return;
+        }
+        downloadFile(next, destPath, signal, redirectsLeft - 1).then(
+          () => finish(),
+          (err: Error) => finish(err),
+        );
         return;
       }
 
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error(`download failed: HTTP ${res.statusCode}`));
+        finish(new Error(`download failed: HTTP ${res.statusCode}`));
         return;
       }
 
@@ -150,29 +272,45 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
         totalBytes += chunk.length;
         if (totalBytes > MAX_DOWNLOAD_BYTES) {
           res.destroy();
-          reject(new Error("download exceeds size limit"));
+          request.destroy();
+          finish(new Error("download exceeds size limit"));
           return;
         }
         chunks.push(chunk);
       });
 
-      res.on("end", async () => {
-        try {
-          const buffer = Buffer.concat(chunks);
-          await writeFile(destPath, buffer, { mode: 0o600 });
-          resolve();
-        } catch (err) {
-          reject(err);
+      res.on("end", () => {
+        if (signal?.aborted) {
+          finish(new Error("download canceled"));
+          return;
         }
+        void writeFile(destPath, Buffer.concat(chunks), { mode: 0o600 }).then(
+          () => finish(),
+          (err: Error) => finish(err),
+        );
       });
 
-      res.on("error", reject);
+      res.on("error", (err: Error) => {
+        finish(err);
+      });
     });
 
-    request.on("error", reject);
+    const onAbort = (): void => {
+      request.destroy();
+      finish(new Error("download canceled"));
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    request.on("error", (err: Error) => {
+      finish(err);
+    });
+
     request.setTimeout(60_000, () => {
       request.destroy();
-      reject(new Error("download timed out"));
+      finish(new Error("download timed out"));
     });
   });
 }
@@ -180,19 +318,49 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 /**
  * Extract a .tar.gz archive using the system tar command.
  */
-async function extractTarGz(archivePath: string, destDir: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    execFile(
+async function extractTarGz(
+  archivePath: string,
+  destDir: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    throw new Error("extraction canceled");
+  }
+
+  return new Promise<void>((resolvePromise, reject) => {
+    let settled = false;
+    const finish = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (err) reject(err);
+      else resolvePromise();
+    };
+
+    const child = execFile(
       "tar",
       ["-xzf", archivePath, "-C", destDir],
       { timeout: 60_000 },
       (error) => {
         if (error) {
-          reject(new Error(`extraction failed: ${error.message}`));
+          if (signal?.aborted) {
+            finish(new Error("extraction canceled"));
+          } else {
+            finish(new Error(`extraction failed: ${error.message}`));
+          }
         } else {
-          resolve();
+          finish();
         }
       },
     );
+
+    const onAbort = (): void => {
+      child.kill();
+      finish(new Error("extraction canceled"));
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -71,6 +72,11 @@ func decodeStrictRaw(raw json.RawMessage, dst interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func hasParam(m map[string]interface{}, key string) bool {
+	_, ok := m[key]
+	return ok
 }
 
 func hasJSONFields(raw json.RawMessage, required ...string) bool {
@@ -310,21 +316,54 @@ func (s *Server) handleDispatchTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Registry admission check for install tasks.
+	// Registry admission check for install / uninstall tasks.
 	if req.Payload.TaskType == "plugin_install" {
 		pluginID, _ := req.Payload.Params["plugin_id"].(string)
 		if pluginID == "" {
 			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_install")
 			return
 		}
-		if !s.registry.HasPlugin(pluginID) {
-			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin_id is not in the official registry")
+		// Reject client-supplied reserved fields.
+		if hasParam(req.Payload.Params, "package_url") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "package_url is reserved for server-side pinning")
 			return
+		}
+		if hasParam(req.Payload.Params, "sha256") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "sha256 is reserved for server-side pinning")
+			return
+		}
+		if hasParam(req.Payload.Params, "manifest") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "manifest is reserved for server-side pinning")
+			return
+		}
+		// Resolve and pin install params from registry.
+		version, _ := req.Payload.Params["version"].(string)
+		pinned, err := s.registry.ResolveInstall(pluginID, version)
+		if err != nil {
+			var apiErr *domain.APIError
+			if errors.As(err, &apiErr) {
+				writeError(w, apiErr)
+				return
+			}
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, err.Error())
+			return
+		}
+		req.Payload.Params = map[string]interface{}{
+			"plugin_id":   pinned.PluginID,
+			"version":     pinned.Version,
+			"package_url": pinned.PackageURL,
+			"sha256":      pinned.SHA256,
+			"manifest":    pinned.Manifest,
 		}
 	}
 	if req.Payload.TaskType == "plugin_uninstall" {
-		if _, ok := req.Payload.Params["plugin_id"].(string); !ok || req.Payload.Params["plugin_id"] == "" {
+		pluginID, ok := req.Payload.Params["plugin_id"].(string)
+		if !ok || pluginID == "" {
 			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_uninstall")
+			return
+		}
+		if s.registry.IsBundled(pluginID) {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrPluginBundled, fmt.Sprintf("plugin %q is bundled and cannot be uninstalled", pluginID))
 			return
 		}
 	}

@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 0.1.0
+  version: 0.1.1
   description: |
-    Language-independent v0.1.0 wire contract for the CapOwn control plane.
+    Language-independent v0.1.1 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
@@ -13,7 +13,7 @@ info:
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "0.1.0"
+  x-capown-protocol-version: "0.1.1"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -711,9 +711,10 @@ paths:
       tags: [plugins]
       summary: Get the official plugin registry catalog
       description: |
-        Returns the loaded plugin registry document. The Master loads
-        `registry/registry.json` at startup. Any authenticated client may
-        read the catalog.
+        Returns the loaded plugin registry document. The Master loads the
+        registry at startup from `~/.capown/master/registry/registry.json`
+        (or an explicitly configured path). Any authenticated client may read
+        the catalog.
       operationId: getPluginCatalog
       security:
         - bearerAuth: []
@@ -1579,7 +1580,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "0.1.0"
+          const: "0.1.1"
         initialized:
           type: boolean
         capabilities:
@@ -2252,13 +2253,18 @@ components:
 
     PluginCatalog:
       type: object
-      description: The official plugin registry document loaded by the Master.
+      description: |
+        The official plugin registry document loaded by the Master at startup.
+        The Master validates the document on load and rejects malformed entries.
+        `source: "bundled"` plugins cannot be installed or uninstalled via tasks.
       properties:
         schema_version:
           type: integer
+          description: Must be `1`.
         updated_at:
           type: string
           format: date-time
+          description: UTC RFC 3339 timestamp of last registry update.
         plugins:
           type: array
           items:
@@ -2266,6 +2272,11 @@ components:
 
     PluginCatalogEntry:
       type: object
+      description: |
+        A single plugin in the registry catalog.
+        `source: "bundled"` plugins are shipped with the Worker and cannot be
+        installed or uninstalled via tasks. `source: "registry"` plugins are
+        downloadable and require `package_url` (HTTPS) and `sha256`.
       properties:
         plugin_id:
           type: string
@@ -2286,6 +2297,9 @@ components:
           enum: [bundled, registry]
         versions:
           type: array
+          description: |
+            Ordered newest-first. When no version is specified in an install
+            request, the Master uses `versions[0]`.
           items:
             type: object
             properties:
@@ -2296,12 +2310,18 @@ components:
                 format: date-time
               package_url:
                 type: string
+                description: HTTPS URL to the `.tar.gz` package. Empty for bundled plugins.
               sha256:
                 type: string
+                description: Hex SHA-256 of the package. Empty for bundled plugins; 64 hex chars for registry plugins.
               requires:
                 type: object
+                description: "Runtime requirements (e.g. {\"node\": \">=20.18.0\"})."
               manifest:
                 type: object
+                description: |
+                  Worker plugin manifest template with `{{install_dir}}` and
+                  `{{workspace}}` placeholders. See protocol/plugin-protocol.md §3.1.
 
     TaskId:
       type: string
@@ -2333,6 +2353,15 @@ components:
               enum: [plugin_call, plugin_install, plugin_uninstall]
             params:
               type: object
+              description: |
+                Task-type-specific parameters.
+
+                plugin_call: { plugin_id, tool_name, arguments }
+                plugin_install: { plugin_id } or { plugin_id, version }.
+                  The Master pins package_url, sha256, and manifest from
+                  the registry; client MUST NOT include these fields.
+                plugin_uninstall: { plugin_id }
+                  Bundled plugins are rejected.
         timeout_seconds:
           type: integer
           minimum: 1

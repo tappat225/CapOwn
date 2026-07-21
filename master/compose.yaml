@@ -21,6 +21,8 @@ services:
       # Set CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS explicitly for an ephemeral
       # environment-variable override.
       CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS: "${CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS-}"
+      # Persistent registry under the /data volume (seeded by entrypoint on first run).
+      CAPOWN_MASTER_REGISTRY_PATH: /data/registry/registry.json
     volumes:
       - type: bind
         source: "${CAPOWN_MASTER_DIR:-${USERPROFILE:-${HOME}}/.capown/master}"

@@ -13,4 +13,15 @@ if [ ! -f "$config_path" ]; then
     cp /opt/capown/config.toml.example "$config_path"
 fi
 
+# Seed the registry on first run if not already present. Always point the
+# Master at the persistent /data path so container HOME search is not used.
+registry_target="${CAPOWN_MASTER_REGISTRY_PATH:-/data/registry/registry.json}"
+export CAPOWN_MASTER_REGISTRY_PATH="$registry_target"
+if [ ! -f "$registry_target" ]; then
+    mkdir -p "$(dirname "$registry_target")"
+    if [ -f /opt/capown/registry/registry.json ]; then
+        cp /opt/capown/registry/registry.json "$registry_target"
+    fi
+fi
+
 exec /usr/local/bin/capown-master "$@"

@@ -75,6 +75,7 @@ Write-Output "Protocol: $ProtocolVersion"
 Write-Output ""
 
 New-Item -ItemType Directory -Path (Join-Path $MasterDir "data") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $MasterDir "registry") -Force | Out-Null
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 
 Write-Output "Building Master..."
@@ -86,6 +87,12 @@ try {
 } finally {
     Pop-Location
 }
+
+# Copy the plugin registry (overwrites on every install).
+$RegistrySrc = (Resolve-Path (Join-Path $MasterSrc "..\registry\registry.json")).Path
+$RegistryDst = Join-Path $MasterDir "registry\registry.json"
+Copy-Item $RegistrySrc $RegistryDst -Force
+Write-Output "Registry: $RegistryDst"
 
 if (-not (Test-Path $ConfigFile)) {
     Copy-Item (Join-Path $MasterSrc "config.toml.example") $ConfigFile

@@ -11,8 +11,7 @@ import { MasterClient } from "./master-client.js";
 import { getPlatformInfo } from "./platform.js";
 import { PluginManager } from "./plugins/manager.js";
 import { PluginError, PluginErrorCodes } from "./plugins/errors.js";
-import type { WorkerJob, PluginCallParams, PluginSetEnabledParams, TaskResultReport } from "./protocol.js";
-import type { InstallParams, UninstallParams } from "./plugins/installer.js";
+import type { WorkerJob, PluginCallParams, PluginSetEnabledParams, PluginInstallParams, PluginUninstallParams, TaskResultReport } from "./protocol.js";
 
 // Backoff limits for reconnection
 const BACKOFF_BASE_MS = 1_000;
@@ -384,22 +383,36 @@ export class WorkerRunner {
         return;
       }
       if (job.task_type === "plugin_install") {
+        if (this._activeTasks.has(job.task_id)) {
+          log.warn("worker: duplicate delivery ignored for active task %s", job.task_id);
+          return;
+        }
         const startedAt = new Date().toISOString();
-        const accepted = await this._reportTaskResult(job.task_id, {
-          task_id: job.task_id,
-          delivery_id: job.delivery_id,
-          worker_id: this._identity.workerId,
-          status: "running",
-          started_at: startedAt,
-          truncated: false,
-        });
-        if (!accepted) return;
-        const params = job.params as unknown as InstallParams;
+        const taskAbort = new AbortController();
+        this._activeTasks.set(job.task_id, taskAbort);
         try {
-          if (typeof params.plugin_id !== "string" || typeof params.package_url !== "string") {
+          const accepted = await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "running",
+            started_at: startedAt,
+            truncated: false,
+          });
+          if (!accepted) return;
+          const params = job.params as unknown as PluginInstallParams;
+          if (typeof params.plugin_id !== "string" || typeof params.package_url !== "string" || typeof params.sha256 !== "string") {
             throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin install parameters are invalid");
           }
-          const plugin = await this._pluginManager.install(params);
+          if (taskAbort.signal.aborted) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
+          const plugin = await this._pluginManager.install(params, taskAbort.signal);
+          if (taskAbort.signal.aborted) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
           await this._client.reportRuntime(
             this._identity.workerId,
             this._pluginManager.getPluginSnapshots(),
@@ -416,6 +429,10 @@ export class WorkerRunner {
             truncated: false,
           });
         } catch (error) {
+          if (taskAbort.signal.aborted || isCancelError(error)) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
           const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
           const message = error instanceof PluginError ? error.safeMessage : "plugin installation failed";
           await this._reportTaskResult(job.task_id, {
@@ -428,26 +445,42 @@ export class WorkerRunner {
             completed_at: new Date().toISOString(),
             truncated: false,
           });
+        } finally {
+          this._activeTasks.delete(job.task_id);
         }
         return;
       }
       if (job.task_type === "plugin_uninstall") {
+        if (this._activeTasks.has(job.task_id)) {
+          log.warn("worker: duplicate delivery ignored for active task %s", job.task_id);
+          return;
+        }
         const startedAt = new Date().toISOString();
-        const accepted = await this._reportTaskResult(job.task_id, {
-          task_id: job.task_id,
-          delivery_id: job.delivery_id,
-          worker_id: this._identity.workerId,
-          status: "running",
-          started_at: startedAt,
-          truncated: false,
-        });
-        if (!accepted) return;
-        const params = job.params as unknown as UninstallParams;
+        const taskAbort = new AbortController();
+        this._activeTasks.set(job.task_id, taskAbort);
         try {
+          const accepted = await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "running",
+            started_at: startedAt,
+            truncated: false,
+          });
+          if (!accepted) return;
+          const params = job.params as unknown as PluginUninstallParams;
           if (typeof params.plugin_id !== "string" || params.plugin_id === "") {
             throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin uninstall parameters are invalid");
           }
-          await this._pluginManager.uninstall(params);
+          if (taskAbort.signal.aborted) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
+          await this._pluginManager.uninstall(params, taskAbort.signal);
+          if (taskAbort.signal.aborted) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
           await this._client.reportRuntime(
             this._identity.workerId,
             this._pluginManager.getPluginSnapshots(),
@@ -464,6 +497,10 @@ export class WorkerRunner {
             truncated: false,
           });
         } catch (error) {
+          if (taskAbort.signal.aborted || isCancelError(error)) {
+            await this._reportCanceled(job.task_id, job.delivery_id, startedAt);
+            return;
+          }
           const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
           const message = error instanceof PluginError ? error.safeMessage : "plugin uninstall failed";
           await this._reportTaskResult(job.task_id, {
@@ -476,6 +513,8 @@ export class WorkerRunner {
             completed_at: new Date().toISOString(),
             truncated: false,
           });
+        } finally {
+          this._activeTasks.delete(job.task_id);
         }
         return;
       }
@@ -687,6 +726,12 @@ export class WorkerRunner {
 // --------------------------------------------------------------------------
 // Worker name slug (mirrors shared/worker_name.py:make_worker_name_slug)
 // --------------------------------------------------------------------------
+
+function isCancelError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes("canceled") || msg.includes("cancelled") || msg.includes("aborted");
+}
 
 const RESERVED_WORKER_NAMES = new Set([
   "master", "admin", "all", "none", "default", "self",

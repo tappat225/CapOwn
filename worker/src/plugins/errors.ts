@@ -13,6 +13,7 @@ export class PluginError extends Error {
 
 export const PluginErrorCodes = {
   PluginNotFound: "plugin_not_found",
+  PluginBundled: "plugin_bundled",
   PluginDisabled: "plugin_disabled",
   PluginUnavailable: "plugin_unavailable",
   PluginToolNotFound: "plugin_tool_not_found",

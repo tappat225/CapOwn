@@ -15,7 +15,11 @@ db_path = "./data/master.db"
 public_url = "http://localhost:9230"
 
 # Path to the plugin registry JSON file.
-# When empty, the Master searches ./registry/registry.json and ../registry/registry.json.
+# When empty, the Master searches:
+#   1. ~/.capown/master/registry/registry.json
+#   2. ./registry/registry.json
+#   3. ../registry/registry.json
+#   4. <exe_dir>/registry/registry.json
 registry_path = ""
 
 # Heartbeat timeout in seconds (workers marked offline after this)

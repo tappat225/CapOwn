@@ -142,6 +142,18 @@ export interface PluginSetEnabledParams {
   enabled: boolean;
 }
 
+export interface PluginInstallParams {
+  plugin_id: string;
+  version: string;
+  package_url: string;
+  sha256: string;
+  manifest: Record<string, unknown>;
+}
+
+export interface PluginUninstallParams {
+  plugin_id: string;
+}
+
 export interface ContentBlock {
   type: "text" | "json";
   text?: string;

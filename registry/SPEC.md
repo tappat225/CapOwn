@@ -88,15 +88,58 @@ Plugin packages are `.tar.gz` archives:
 The Worker extracts the archive into `~/.capown/worker/plugins/<plugin_id>/`
 and generates `plugins.d/<plugin_id>.json` from the registry manifest template.
 
+## Deployment
+
+The canonical registry file lives at the repository root (`registry/registry.json`).
+At install or deploy time it is copied to the Master data directory:
+
+| Deployment | Registry target |
+|---|---|
+| Local install (bash) | `~/.capown/master/registry/registry.json` (copied by installer) |
+| Local install (PowerShell) | `%USERPROFILE%\.capown\master\registry\registry.json` (copied by installer) |
+| Docker | `/data/registry/registry.json` (seeded from `/opt/capown/registry/` on first run) |
+
+The Master searches for the registry at startup in this order when
+`registry_path` is not explicitly configured:
+
+1. `~/.capown/master/registry/registry.json`
+2. `./registry/registry.json` (when cwd is the install dir)
+3. `../registry/registry.json` (when cwd is `master/`)
+4. Beside the Master executable
+
+## Schema validation
+
+The Master rejects a malformed registry at startup:
+
+- `schema_version` must be `1`
+- `updated_at` must be a non-empty RFC 3339 timestamp
+- Each `plugin_id` must be unique and non-empty
+- `source` must be `"bundled"` or `"registry"`
+- `versions` must be non-empty
+- When `source: "registry"`:
+  - `package_url` must start with `https://`
+  - `sha256` must be a non-empty 64-character hex string
+- When `source: "bundled"`: `package_url` and `sha256` may be empty
+
+If the file exists but is malformed the Master fails to start. If the file
+does not exist the Master starts with a warning and an empty catalog (all
+install requests will fail).
+
 ## Security requirements
 
-- `package_url` MUST use HTTPS.
-- Workers MUST verify `sha256` before extraction.
-- `manifest.command` MUST reference paths inside `{{install_dir}}` only.
+- `package_url` MUST use HTTPS. Workers MUST reject `http://`.
+- `sha256` is mandatory for all registry-source plugins. Workers MUST verify
+  the hash before extraction and fail on mismatch.
+- `manifest.command` arguments that look like paths MUST be inside
+  `{{install_dir}}`. Interpreters in system PATH are allowed as argv[0].
+- The Master rejects `plugin_install` for `source: "bundled"` plugins.
+- The Master rejects `plugin_uninstall` for `source: "bundled"` plugins.
+- Unknown plugin IDs are allowed for `plugin_uninstall` (cleanup) but not
+  for `plugin_install`.
+- The Master strips any `package_url`, `sha256`, or `manifest` fields from
+  the client request and always pins from the registry.
 - `manifest.env` MUST NOT contain secrets; secrets are configured locally by
   the Worker operator after installation.
-- The Master rejects `plugin_install` tasks for plugin IDs not present in this
-  registry.
 
 ## Change process
 

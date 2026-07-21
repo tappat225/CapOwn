@@ -138,6 +138,7 @@ SSE; current Workers use the authenticated claim endpoint.
 | Worker identity | `~/.capown/worker/identity.toml` |
 | Worker plugins | `~/.capown/worker/plugins.d/` |
 | Worker logs | `~/.capown/worker/worker.log` |
+| Master registry | `~/.capown/master/registry/registry.json` |
 
 Keep config, database, identity, registration links, and bearer tokens out of
 source control and logs. Registration tokens are returned in plaintext only
