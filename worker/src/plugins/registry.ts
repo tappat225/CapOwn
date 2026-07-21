@@ -35,6 +35,10 @@ export class PluginRegistry {
     return this.plugins.get(pluginId);
   }
 
+  unregister(pluginId: string): void {
+    this.plugins.delete(pluginId);
+  }
+
   getAll(): RegisteredPlugin[] {
     return Array.from(this.plugins.values());
   }

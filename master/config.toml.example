@@ -14,6 +14,14 @@ db_path = "./data/master.db"
 # Public URL (for dashboard redirects, optional)
 public_url = "http://localhost:9230"
 
+# Path to the plugin registry JSON file.
+# When empty, the Master searches:
+#   1. ~/.capown/master/registry/registry.json
+#   2. ./registry/registry.json
+#   3. ../registry/registry.json
+#   4. <exe_dir>/registry/registry.json
+registry_path = ""
+
 # Heartbeat timeout in seconds (workers marked offline after this)
 heartbeat_timeout = 60
 

@@ -521,7 +521,7 @@ func (s *Server) handleAdminCreateRegistration(w http.ResponseWriter, r *http.Re
 		req.ExpiresIn = 86400
 	}
 	if req.MaxUses <= 0 {
-		req.MaxUses = 1
+		req.MaxUses = defaultWorkerRegistrationMaxUses
 	}
 
 	plaintext, token, err := s.store.CreateRegistrationToken(user.UserID, req.ExpiresIn, req.MaxUses, req.Label)

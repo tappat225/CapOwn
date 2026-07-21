@@ -7,6 +7,8 @@ import { PluginRegistry } from "./registry.js";
 import type { PluginInfo, PluginCallResult, ContentBlock } from "./types.js";
 import { PluginError, PluginErrorCodes } from "./errors.js";
 import { provisionDefaultPlugins } from "./defaults.js";
+import { installPlugin, uninstallPlugin } from "./installer.js";
+import type { InstallParams, UninstallParams } from "./installer.js";
 
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_DELAY_MS = 2000;
@@ -275,5 +277,45 @@ export class PluginManager {
     }, RESTART_DELAY_MS);
 
     this.restartTimers.set(pluginId, timer);
+  }
+
+  // Set of plugin IDs that are bundled and must not be uninstalled.
+  private static BUNDLED_PLUGIN_IDS = new Set(["filesystem"]);
+
+  async install(params: InstallParams, signal?: AbortSignal): Promise<PluginInfo> {
+    const existing = this.registry.get(params.plugin_id);
+    if (existing) {
+      // Stop existing instance before reinstalling
+      await existing.adapter.stop();
+    }
+
+    const manifest = await installPlugin(this.configDir, params, signal);
+
+    // Unregister old entry if present
+    if (existing) {
+      this.registry.unregister(params.plugin_id);
+    }
+
+    // Register and start the new plugin
+    const entry = this.registry.register(manifest, join(this.pluginsDir, `${params.plugin_id}.json`));
+    await entry.adapter.start();
+    this.registry.emitSnapshotsChanged();
+    return entry.adapter.getInfo();
+  }
+
+  async uninstall(params: UninstallParams, _signal?: AbortSignal): Promise<void> {
+    if (PluginManager.BUNDLED_PLUGIN_IDS.has(params.plugin_id)) {
+      throw new PluginError(
+        PluginErrorCodes.PluginBundled,
+        `plugin "${params.plugin_id}" is bundled and cannot be uninstalled`,
+      );
+    }
+    const plugin = this.registry.get(params.plugin_id);
+    if (plugin) {
+      await plugin.adapter.stop();
+      this.registry.unregister(params.plugin_id);
+    }
+    await uninstallPlugin(this.configDir, params);
+    this.registry.emitSnapshotsChanged();
   }
 }

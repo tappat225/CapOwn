@@ -14,6 +14,8 @@ type createRegistrationRequest struct {
 	MaxUses   int    `json:"max_uses"`
 }
 
+const defaultWorkerRegistrationMaxUses = 10
+
 func (s *Server) buildRegistrationURL(token string) string {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.config.Master.PublicURL), "/")
 	if baseURL == "" {
@@ -86,7 +88,7 @@ func (s *Server) handleCreateRegistration(w http.ResponseWriter, r *http.Request
 		req.ExpiresIn = 86400 // 24 hours
 	}
 	if req.MaxUses <= 0 {
-		req.MaxUses = 1
+		req.MaxUses = defaultWorkerRegistrationMaxUses
 	}
 
 	plaintext, token, err := s.store.CreateRegistrationToken(ctx.UserID, req.ExpiresIn, req.MaxUses, req.Label)

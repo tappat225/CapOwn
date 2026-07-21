@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -71,6 +72,11 @@ func decodeStrictRaw(raw json.RawMessage, dst interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func hasParam(m map[string]interface{}, key string) bool {
+	_, ok := m[key]
+	return ok
 }
 
 func hasJSONFields(raw json.RawMessage, required ...string) bool {
@@ -305,9 +311,61 @@ func (s *Server) handleDispatchTask(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "payload.params is required")
 		return
 	}
-	if req.Payload.TaskType != "plugin_call" {
-		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "unsupported task_type; only plugin_call is supported")
+	if req.Payload.TaskType != "plugin_call" && req.Payload.TaskType != "plugin_install" && req.Payload.TaskType != "plugin_uninstall" {
+		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "unsupported task_type; must be plugin_call, plugin_install, or plugin_uninstall")
 		return
+	}
+
+	// Registry admission check for install / uninstall tasks.
+	if req.Payload.TaskType == "plugin_install" {
+		pluginID, _ := req.Payload.Params["plugin_id"].(string)
+		if pluginID == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_install")
+			return
+		}
+		// Reject client-supplied reserved fields.
+		if hasParam(req.Payload.Params, "package_url") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "package_url is reserved for server-side pinning")
+			return
+		}
+		if hasParam(req.Payload.Params, "sha256") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "sha256 is reserved for server-side pinning")
+			return
+		}
+		if hasParam(req.Payload.Params, "manifest") {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "manifest is reserved for server-side pinning")
+			return
+		}
+		// Resolve and pin install params from registry.
+		version, _ := req.Payload.Params["version"].(string)
+		pinned, err := s.registry.ResolveInstall(pluginID, version)
+		if err != nil {
+			var apiErr *domain.APIError
+			if errors.As(err, &apiErr) {
+				writeError(w, apiErr)
+				return
+			}
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, err.Error())
+			return
+		}
+		req.Payload.Params = map[string]interface{}{
+			"plugin_id":   pinned.PluginID,
+			"version":     pinned.Version,
+			"package_url": pinned.PackageURL,
+			"sha256":      pinned.SHA256,
+			"manifest":    pinned.Manifest,
+		}
+	}
+	if req.Payload.TaskType == "plugin_uninstall" {
+		pluginID, ok := req.Payload.Params["plugin_id"].(string)
+		if !ok || pluginID == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_uninstall")
+			return
+		}
+		if s.registry.IsBundled(pluginID) {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrPluginBundled, fmt.Sprintf("plugin %q is bundled and cannot be uninstalled", pluginID))
+			return
+		}
 	}
 
 	timeout := 120
@@ -604,4 +662,16 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toTaskResponse(canceledTask))
+}
+
+// handlePluginCatalog returns the loaded plugin registry document.
+func (s *Server) handlePluginCatalog(w http.ResponseWriter, r *http.Request) {
+	if _, apiErr := s.resolveAPI(r); apiErr != nil {
+		writeError(w, apiErr)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	w.Write(s.registry.RawJSON())
 }

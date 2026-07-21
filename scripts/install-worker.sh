@@ -83,6 +83,11 @@ echo "npm version:     ${NPM_VERSION}"
 # --- Create directories ---
 mkdir -p "${BIN_DIR}" "${CONFIG_DIR}"
 
+# --- Sync version metadata in the monorepo before copy ---
+echo ""
+echo "Synchronizing Worker version metadata..."
+node "${SCRIPT_DIR}/version.mjs" sync-worker
+
 # --- Copy and build in a fresh staging directory ---
 echo ""
 echo "Copying Worker source..."

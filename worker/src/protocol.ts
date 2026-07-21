@@ -7,7 +7,6 @@
 
 export interface WorkerRegistrationRequest {
   registration_token: string;
-  worker_name: string;
   public_key: string;
   hostname: string;
   os: string;
@@ -140,6 +139,18 @@ export interface PluginCallParams {
 export interface PluginSetEnabledParams {
   plugin_id: string;
   enabled: boolean;
+}
+
+export interface PluginInstallParams {
+  plugin_id: string;
+  version: string;
+  package_url: string;
+  sha256: string;
+  manifest: Record<string, unknown>;
+}
+
+export interface PluginUninstallParams {
+  plugin_id: string;
 }
 
 export interface ContentBlock {

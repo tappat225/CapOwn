@@ -121,7 +121,7 @@ func (s *Store) initDB() error {
 			user_id      TEXT NOT NULL REFERENCES users(user_id),
 			scope        TEXT NOT NULL DEFAULT 'worker',
 			expires_at   TEXT NOT NULL,
-			max_uses     INTEGER NOT NULL DEFAULT 1,
+			max_uses     INTEGER NOT NULL DEFAULT 10,
 			used_count   INTEGER NOT NULL DEFAULT 0,
 			revoked_at   TEXT,
 			created_at   TEXT NOT NULL,
@@ -133,6 +133,7 @@ func (s *Store) initDB() error {
 			worker_name TEXT NOT NULL,
 			owner_user_id TEXT NOT NULL,
 			public_key TEXT NOT NULL DEFAULT '',
+			registration_token_id TEXT,
 			hostname TEXT NOT NULL,
 			os TEXT DEFAULT 'linux',
 			mode TEXT DEFAULT 'container',
@@ -167,6 +168,21 @@ func (s *Store) initDB() error {
 			return err
 		}
 	}
+
+	// Public keys identify the local Worker installation, not a permanent
+	// Master registration. Multiple historical registrations may reuse a key.
+	// Drop the uniqueness index introduced by the previous registration model
+	// before normalizing legacy rows.
+	if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_worker_public_key_active`); err != nil {
+		return fmt.Errorf("drop Worker public key uniqueness index: %w", err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE workers SET public_key = lower(trim(public_key))
+		 WHERE public_key != lower(trim(public_key))`,
+	); err != nil {
+		return fmt.Errorf("normalize Worker public keys: %w", err)
+	}
+
 	for _, migration := range []struct {
 		table      string
 		column     string
@@ -175,6 +191,7 @@ func (s *Store) initDB() error {
 		{"workers", "previous_worker_name", "TEXT"},
 		{"workers", "renamed_at", "TEXT"},
 		{"workers", "plugins", "TEXT NOT NULL DEFAULT ''"},
+		{"workers", "registration_token_id", "TEXT"},
 		{"auth_tokens", "last_used_ip", "TEXT"},
 		{"auth_tokens", "disabled_at", "TEXT"},
 	} {
@@ -187,6 +204,19 @@ func (s *Store) initDB() error {
 				return err
 			}
 		}
+	}
+	if _, err := s.db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_worker_public_key_active
+			ON workers(public_key) WHERE revoked_at IS NULL AND public_key != ''`,
+	); err != nil {
+		return fmt.Errorf("create active Worker public key index: %w", err)
+	}
+	if _, err := s.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_registration_identity
+			ON workers(registration_token_id, public_key)
+			WHERE registration_token_id IS NOT NULL AND public_key != '' AND revoked_at IS NULL`,
+	); err != nil {
+		return fmt.Errorf("create Worker registration identity index: %w", err)
 	}
 	return nil
 }

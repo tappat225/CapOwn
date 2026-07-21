@@ -12,6 +12,7 @@ import (
 	"github.com/capown/master/internal/config"
 	"github.com/capown/master/internal/domain"
 	"github.com/capown/master/internal/events"
+	"github.com/capown/master/internal/registry"
 	"github.com/capown/master/internal/service"
 	"github.com/capown/master/internal/store"
 	"github.com/capown/master/internal/tasks"
@@ -29,6 +30,7 @@ type Server struct {
 	srv            *http.Server
 	pwHashSem      chan struct{} // semaphore for password hashing concurrency
 	taskStore      *tasks.Store
+	registry       *registry.Registry
 	shutdown       chan struct{}
 	shutdownOnce   sync.Once
 }
@@ -53,6 +55,11 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	db := events.NewDashboardBus(64, cfg.Master.MaxDashboardSubscribers)
 	ts := tasks.NewStore()
 
+	reg, err := registry.New(cfg.Master.RegistryPath)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		config:         cfg,
 		store:          st,
@@ -62,6 +69,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		mux:            http.NewServeMux(),
 		pwHashSem:      make(chan struct{}, cfg.Master.PasswordHashConcurrency),
 		taskStore:      ts,
+		registry:       reg,
 		shutdown:       make(chan struct{}),
 	}
 
@@ -166,6 +174,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/workers", s.handleListWorkers)
 
 	// Plugin routes
+	s.mux.HandleFunc("GET /v1/plugins/catalog", s.handlePluginCatalog)
 	s.mux.HandleFunc("GET /v1/workers/{worker_id}/plugins", s.handleListWorkerPlugins)
 	s.mux.HandleFunc("PATCH /v1/workers/{worker_id}/plugins/{plugin_id}", s.handleSetWorkerPluginEnabled)
 

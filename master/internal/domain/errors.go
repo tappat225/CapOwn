@@ -37,6 +37,7 @@ const (
 	ErrInvitationInvalid     = "invitation_invalid"
 
 	// Plugin error codes
+	ErrPluginBundled             = "plugin_bundled"
 	ErrPluginNotFound            = "plugin_not_found"
 	ErrPluginDisabled            = "plugin_disabled"
 	ErrPluginUnavailable         = "plugin_unavailable"

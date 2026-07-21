@@ -103,6 +103,35 @@ async function doPut<T>(
 }
 
 // --------------------------------------------------------------------------
+// Registration error formatting
+// --------------------------------------------------------------------------
+
+function formatRegisterError(status: number, text: string): string {
+  if (status === 0) {
+    return text || "network error";
+  }
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: { code?: string; message?: string };
+    };
+    const code = parsed.error?.code;
+    const message = parsed.error?.message;
+    if (code && message) {
+      return `${message} (${code})`;
+    }
+    if (message) {
+      return message;
+    }
+  } catch {
+    // fall through
+  }
+  if (text) {
+    return `HTTP ${status}: ${text}`;
+  }
+  return `HTTP ${status}`;
+}
+
+// --------------------------------------------------------------------------
 // MasterClient
 // --------------------------------------------------------------------------
 
@@ -110,10 +139,9 @@ export interface MasterClientOptions {
   masterUrl: string;
 }
 
-export interface RegisterResult {
-  workerId: string;
-  workerName: string;
-}
+export type RegisterResult =
+  | { ok: true; workerId: string; workerName: string }
+  | { ok: false; message: string };
 
 export type TaskResultReportOutcome = "ok" | "retryable" | "rejected";
 
@@ -142,19 +170,14 @@ export class MasterClient {
   // Registration
   // ------------------------------------------------------------------
 
-  /** Register this worker with the Master via registration token.
-   *
-   * Returns ``{workerId, workerName}`` on success or null on failure.
-   */
+  /** Register this worker with the Master via registration token. */
   async register(
     registrationToken: string,
-    workerName: string,
     publicKeyHex: string,
-  ): Promise<RegisterResult | null> {
+  ): Promise<RegisterResult> {
     const platform = getPlatformInfo();
     const body: WorkerRegistrationRequest = {
       registration_token: registrationToken,
-      worker_name: workerName,
       public_key: publicKeyHex,
       hostname: platform.hostname,
       os: platform.os,
@@ -168,12 +191,13 @@ export class MasterClient {
 
     if (result.ok) {
       return {
+        ok: true,
         workerId: result.data.worker_id,
         workerName: result.data.worker_name,
       };
     }
 
-    return null;
+    return { ok: false, message: formatRegisterError(result.status, result.text) };
   }
 
   // ------------------------------------------------------------------

@@ -18,6 +18,7 @@ ARG CAPOWN_PROTOCOL_VERSION
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /capown-master /usr/local/bin/capown-master
 COPY master/config.toml.example /opt/capown/config.toml.example
+COPY registry/ /opt/capown/registry/
 COPY master/docker-entrypoint.sh /usr/local/bin/capown-entrypoint
 RUN chmod +x /usr/local/bin/capown-entrypoint
 LABEL org.opencontainers.image.title="CapOwn Master" \

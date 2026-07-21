@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -375,12 +376,13 @@ func TestRenameAndRevokeWorkerAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workerID, _, err := s.RegisterWorkerAtomic(
-		plaintext, "worker_one", "host", "00", "linux", "capability", "", "",
+	result, _, err := s.RegisterWorkerAtomic(
+		plaintext, "host", "00", "linux", "capability", "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	workerID := result.WorkerID
 	worker, err := s.GetActiveWorker(workerID)
 	if err != nil || worker == nil || worker.Status != "offline" || worker.LastHeartbeat.Valid {
 		t.Fatalf("new Worker should be offline before runtime heartbeat: %#v, %v", worker, err)
@@ -395,7 +397,7 @@ func TestRenameAndRevokeWorkerAtomic(t *testing.T) {
 	if err != nil || worker == nil {
 		t.Fatalf("get renamed worker: %v", err)
 	}
-	if worker.WorkerName != "worker.two" || !worker.PreviousWorkerName.Valid || worker.PreviousWorkerName.String != "worker_one" {
+	if worker.WorkerName != "worker.two" || !worker.PreviousWorkerName.Valid || worker.PreviousWorkerName.String != "host" {
 		t.Fatalf("unexpected rename state: %#v", worker)
 	}
 	owner, err := s.GetOwner(workerID)
@@ -410,5 +412,197 @@ func TestRenameAndRevokeWorkerAtomic(t *testing.T) {
 	}
 	if active, err := s.GetActiveWorker(workerID); err != nil || active != nil {
 		t.Fatalf("revoked worker should be inactive: %#v, %v", active, err)
+	}
+}
+
+func TestRegisterWorkerRegistrationIdentity(t *testing.T) {
+	s := newTestStore(t)
+	_, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, _ := s.GetUser("admin")
+
+	token1, token1Row, err := s.CreateRegistrationToken(admin.UserID, 3600, 2, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubKey := "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	first, errCode, err := s.RegisterWorkerAtomic(
+		token1, "host.example", pubKey, "linux", "capability", "", "",
+	)
+	if err != nil || first == nil || first.WorkerID == "" || !first.Created {
+		t.Fatalf("first registration failed: code=%q err=%v", errCode, err)
+	}
+	if first.WorkerName != "host-example" {
+		t.Fatalf("unexpected Master-generated Worker name: %q", first.WorkerName)
+	}
+
+	// Reusing the same token and identity is idempotent, even after the first
+	// token use and regardless of public key case.
+	retry, errCode, err := s.RegisterWorkerAtomic(
+		token1, "different-host", strings.ToUpper(pubKey), "linux", "capability", "", "",
+	)
+	if err != nil || retry == nil || retry.Created || retry.WorkerID != first.WorkerID || retry.WorkerName != first.WorkerName {
+		t.Fatalf("expected idempotent registration, got result=%#v code=%q err=%v", retry, errCode, err)
+	}
+	token1After, err := s.GetRegistrationTokenByID(token1Row.TokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token1After.UsedCount != 1 {
+		t.Fatalf("idempotent retry should not consume token, got used_count=%d", token1After.UsedCount)
+	}
+
+	// A new token creates a new registration even for the same owner and key.
+	token1b, _, err := s.CreateRegistrationToken(admin.UserID, 3600, 1, "t1b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reregistered, errCode, err := s.RegisterWorkerAtomic(
+		token1b, "new-host", pubKey, "linux", "capability", "", "",
+	)
+	if err != nil || reregistered == nil || !reregistered.Created || reregistered.WorkerID == first.WorkerID {
+		t.Fatalf("new-token re-registration failed: result=%#v code=%q err=%v", reregistered, errCode, err)
+	}
+	if reregistered.WorkerName != first.WorkerName || len(reregistered.Superseded) != 1 || reregistered.Superseded[0].WorkerID != first.WorkerID {
+		t.Fatalf("new-token re-registration did not preserve and supersede the prior Worker: %#v", reregistered)
+	}
+
+	// The same multi-use token can register a different identity and gets a
+	// distinct Worker ID.
+	otherKey := strings.Repeat("bc", 32)
+	second, errCode, err := s.RegisterWorkerAtomic(
+		token1, "host.example", otherKey, "linux", "capability", "", "",
+	)
+	if err != nil || second == nil || !second.Created || second.WorkerID == first.WorkerID {
+		t.Fatalf("second registration failed: result=%#v code=%q err=%v", second, errCode, err)
+	}
+	if second.WorkerName != "host-example-2" {
+		t.Fatalf("unexpected collision-resolved Worker name: %q", second.WorkerName)
+	}
+
+	// A second active identity with the same hostname gets a unique suffix.
+	token1c, _, err := s.CreateRegistrationToken(admin.UserID, 3600, 1, "t1c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, errCode, err := s.RegisterWorkerAtomic(
+		token1c, "host.example", strings.Repeat("de", 32), "linux", "capability", "", "",
+	)
+	if err != nil || third == nil || !third.Created || third.WorkerName != "host-example-3" {
+		t.Fatalf("expected a unique Master-generated suffix: result=%#v code=%q err=%v", third, errCode, err)
+	}
+
+	// A new owner's token transfers the same installation to a new Worker ID.
+	other, err := s.CreateUser("other", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token2, token2Row, err := s.CreateRegistrationToken(other.UserID, 3600, 1, "t2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transferred, errCode, err := s.RegisterWorkerAtomic(
+		token2, "new-host", pubKey, "linux", "capability", "", "",
+	)
+	if err != nil || transferred == nil || !transferred.Created || transferred.WorkerID == first.WorkerID {
+		t.Fatalf("transfer failed: result=%#v code=%q err=%v", transferred, errCode, err)
+	}
+	if transferred.WorkerName != first.WorkerName || len(transferred.Superseded) != 1 || transferred.Superseded[0].WorkerID != reregistered.WorkerID {
+		t.Fatalf("transfer did not preserve and supersede the prior registration: %#v", transferred)
+	}
+	for _, oldID := range []string{first.WorkerID, reregistered.WorkerID} {
+		if active, err := s.GetActiveWorker(oldID); err != nil || active != nil {
+			t.Fatalf("prior Worker should be revoked after transfer: id=%s worker=%#v err=%v", oldID, active, err)
+		}
+	}
+	transferredOwner, err := s.GetOwner(transferred.WorkerID)
+	if err != nil || transferredOwner == nil || transferredOwner.UserID != other.UserID {
+		t.Fatalf("transferred Worker has wrong owner: %#v, %v", transferredOwner, err)
+	}
+
+	// Replaying a superseded registration must not restore the revoked ID.
+	_, errCode, err = s.RegisterWorkerAtomic(
+		token1, "host.example", pubKey, "linux", "capability", "", "",
+	)
+	if err == nil || errCode != "registration_superseded" {
+		t.Fatalf("expected registration_superseded, got code=%q err=%v", errCode, err)
+	}
+	token2After, err := s.GetRegistrationTokenByID(token2Row.TokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token2After.UsedCount != 1 {
+		t.Fatalf("transfer should consume the new token, got used_count=%d", token2After.UsedCount)
+	}
+}
+
+func insertLegacyWorker(t *testing.T, s *Store, workerID, ownerID, publicKey string) {
+	t.Helper()
+	_, err := s.rawDB().Exec(
+		`INSERT INTO workers (worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, registered_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?)`,
+		workerID, workerID, ownerID, publicKey, "legacy-host", "linux", "capability", "", "", NowISO(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNormalizeLegacyWorkerPublicKeyBeforeIndex(t *testing.T) {
+	s := newTestStore(t)
+	_, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.GetUser("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.rawDB().Exec(`DROP INDEX idx_worker_public_key_active`); err != nil {
+		t.Fatal(err)
+	}
+	publicKey := strings.Repeat("ab", 32)
+	insertLegacyWorker(t, s, "wrk_legacy_upper", user.UserID, strings.ToUpper(publicKey))
+
+	if err := s.initDB(); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := s.GetWorker("wrk_legacy_upper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.PublicKey != publicKey {
+		t.Fatalf("legacy public key was not normalized: %q", worker.PublicKey)
+	}
+}
+
+func TestAllowLegacyDuplicateWorkerPublicKeysDuringMigration(t *testing.T) {
+	s := newTestStore(t)
+	_, _, _, err := s.RegisterFirstUser("admin", "password123", 3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.GetUser("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.rawDB().Exec(`DROP INDEX idx_worker_public_key_active`); err != nil {
+		t.Fatal(err)
+	}
+	publicKey := strings.Repeat("cd", 32)
+	insertLegacyWorker(t, s, "wrk_legacy_one", user.UserID, publicKey)
+	insertLegacyWorker(t, s, "wrk_legacy_two", user.UserID, strings.ToUpper(publicKey))
+
+	if err := s.initDB(); err != nil {
+		t.Fatal(err)
+	}
+	workers, err := s.ListAllWorkers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 2 {
+		t.Fatalf("expected both legacy Workers to remain, got %d", len(workers))
 	}
 }

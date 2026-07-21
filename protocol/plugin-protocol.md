@@ -384,7 +384,115 @@ redelivery; a Worker MUST NOT claim success without a result.
   specified sandbox implementation; manifest declarations alone are not a
   sandbox.
 
-## 11. Future extension
+## 11. Plugin distribution and installation
+
+The Master loads an official plugin registry (`registry/registry.json`) at
+startup and exposes it through a read-only catalog endpoint:
+
+```http
+GET /v1/plugins/catalog
+Authorization: Bearer <token>
+```
+
+The catalog response is the registry document verbatim. Any authenticated
+client (web, client, admin, worker) may read it.
+
+### 11.1 Install task
+
+Plugin installation uses the `plugin_install` task type dispatched through
+`POST /v1/tasks`:
+
+```json
+{
+  "task_type": "plugin_install",
+  "params": {
+    "plugin_id": "sqlite",
+    "version": "1.0.0"
+  }
+}
+```
+
+The client sends only `plugin_id` and optional `version`. When `version` is
+omitted the Master resolves the newest version (first entry in `versions[]`).
+The Master MUST:
+
+1. Verify `plugin_id` exists in the loaded registry;
+2. Reject plugins with `source: "bundled"`;
+3. Look up the requested (or latest) version;
+4. **Pin** the full set of install parameters from the registry record
+   (`package_url`, `sha256`, `manifest` template) — the client-supplied
+   params MUST NOT contain these fields; and
+5. Enqueue the task with the **pinned** params:
+
+```json
+{
+  "task_type": "plugin_install",
+  "params": {
+    "plugin_id": "sqlite",
+    "version": "1.0.0",
+    "package_url": "https://cdn.example.com/plugins/sqlite-1.0.0.tar.gz",
+    "sha256": "abcdef0123456789...",
+    "manifest": { "...": "manifest template from registry" }
+  }
+}
+```
+
+The Worker performs:
+
+1. download `package_url` to a temporary directory;
+2. verify the archive SHA-256 matches `sha256`;
+3. extract into `~/.capown/worker/plugins/<plugin_id>/`;
+4. render the manifest template (replacing `{{install_dir}}` and
+   `{{workspace}}`) and write `plugins.d/<plugin_id>.json`;
+5. register, start, and report the new plugin; and
+6. report task completion with the plugin snapshot.
+
+### 11.2 Uninstall task
+
+```json
+{
+  "task_type": "plugin_uninstall",
+  "params": {
+    "plugin_id": "sqlite"
+  }
+}
+```
+
+The Worker stops the plugin, removes `plugins.d/<plugin_id>.json` and the
+installation directory, then reports completion.
+
+**Bundled plugin rules:**
+
+- `source: "bundled"` plugins MUST NOT be installed or uninstalled via the
+  task system. The Master rejects both `plugin_install` and
+  `plugin_uninstall` for any plugin whose registry entry has
+  `source: "bundled"`.
+- Unknown plugin IDs are permitted for `plugin_uninstall` (to clean up local
+  state from a removed registry entry) but are rejected for
+  `plugin_install`.
+- The Worker MUST also reject `uninstall` for its built-in bundled plugin set
+  as a defense-in-depth measure.
+
+### 11.3 Security constraints
+
+- `package_url` MUST use HTTPS. The Worker MUST reject `http://` URLs.
+- `sha256` is mandatory (non-empty). The Worker MUST verify the hash before
+  extraction and reject a mismatch with a descriptive error.
+- `manifest.command` arguments that look like filesystem paths MUST be
+  contained within the plugin installation directory. Interpreters
+  (`node`, `python3`, `process.execPath`) in system PATH are allowed as the
+  first argument.
+- The Master rejects any `plugin_install` request whose params include
+  `package_url`, `sha256`, or `manifest` — these fields are reserved for
+  the Master pin step.
+- Plugin environment variables MUST NOT contain secrets in transit; secrets are
+  configured locally after installation.
+- Cancellation: the Worker MUST accept an `AbortSignal` for install and
+  uninstall operations, aborting in-flight downloads and killing extract
+  processes. The runner registers install/uninstall tasks in `_activeTasks`
+  so a `cancel` job can abort them.
+
+## 12. Future extension
 
 The plugin and task schemas are part of the current `/v1` contract in
 `protocol/openapi.yaml`.

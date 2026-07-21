@@ -226,6 +226,7 @@ See `config.toml.example` for all options.
 | `CAPOWN_MASTER_DB_PATH` | db_path | `./data/master.db` |
 | `CAPOWN_MASTER_PUBLIC_URL` | public_url | `""` |
 | `CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS` | allowed_dashboard_origins | empty (uses config file; empty list is unrestricted) |
+| `CAPOWN_MASTER_REGISTRY_PATH` | registry_path | auto-detected |
 | `CAPOWN_MASTER_LOG_LEVEL` | log_level | `"info"` |
 
 `CAPOWN_MASTER_PUBLIC_URL` is used to generate Worker registration links

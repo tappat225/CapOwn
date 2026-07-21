@@ -73,7 +73,7 @@ echo "Product:  ${PRODUCT_VERSION}"
 echo "Protocol: ${PROTOCOL_VERSION}"
 echo ""
 
-mkdir -p "${MASTER_DIR}/data" "${BIN_DIR}"
+mkdir -p "${MASTER_DIR}/data" "${MASTER_DIR}/registry" "${BIN_DIR}"
 
 echo "Building Master..."
 (
@@ -82,6 +82,11 @@ echo "Building Master..."
     -ldflags "-X github.com/capown/master/internal/version.ProductVersion=${PRODUCT_VERSION} -X github.com/capown/master/internal/version.ProtocolVersion=${PROTOCOL_VERSION}" \
     -o "${BINARY_FILE}" ./cmd/capown-master
 )
+
+# Copy the plugin registry (overwrites on every install).
+cp "${MASTER_SRC}/../registry/registry.json" "${MASTER_DIR}/registry/registry.json"
+chmod 644 "${MASTER_DIR}/registry/registry.json"
+echo "Registry: ${MASTER_DIR}/registry/registry.json"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   cp "${MASTER_SRC}/config.toml.example" "${CONFIG_FILE}"
