@@ -384,7 +384,73 @@ redelivery; a Worker MUST NOT claim success without a result.
   specified sandbox implementation; manifest declarations alone are not a
   sandbox.
 
-## 11. Future extension
+## 11. Plugin distribution and installation
+
+The Master loads an official plugin registry (`registry/registry.json`) at
+startup and exposes it through a read-only catalog endpoint:
+
+```http
+GET /v1/plugins/catalog
+Authorization: Bearer <token>
+```
+
+The catalog response is the registry document verbatim. Any authenticated
+client (web, client, admin, worker) may read it.
+
+### 11.1 Install task
+
+Plugin installation uses the `plugin_install` task type dispatched through
+`POST /v1/tasks` or the Dashboard install flow:
+
+```json
+{
+  "task_type": "plugin_install",
+  "params": {
+    "plugin_id": "sqlite",
+    "version": "1.0.0",
+    "package_url": "https://cdn.example.com/plugins/sqlite-1.0.0.tar.gz",
+    "sha256": "abcdef...",
+    "manifest": { "...": "manifest template from registry" }
+  }
+}
+```
+
+The Master MUST verify that `plugin_id` exists in the loaded registry before
+enqueuing the task. The Worker performs:
+
+1. download `package_url` to a temporary directory;
+2. verify the archive SHA-256 matches `sha256`;
+3. extract into `~/.capown/worker/plugins/<plugin_id>/`;
+4. render the manifest template (replacing `{{install_dir}}` and
+   `{{workspace}}`) and write `plugins.d/<plugin_id>.json`;
+5. register, start, and report the new plugin; and
+6. report task completion with the plugin snapshot.
+
+### 11.2 Uninstall task
+
+```json
+{
+  "task_type": "plugin_uninstall",
+  "params": {
+    "plugin_id": "sqlite"
+  }
+}
+```
+
+The Worker stops the plugin, removes `plugins.d/<plugin_id>.json` and the
+installation directory, then reports completion. Bundled plugins
+(`source: "bundled"` in the registry) MUST NOT be uninstalled.
+
+### 11.3 Security constraints
+
+- `package_url` MUST use HTTPS.
+- The Worker MUST verify `sha256` before extraction.
+- `manifest.command` MUST reference paths inside the installation directory.
+- The Master rejects install tasks for plugin IDs absent from the registry.
+- Plugin environment variables MUST NOT contain secrets in transit; secrets are
+  configured locally after installation.
+
+## 12. Future extension
 
 The plugin and task schemas are part of the current `/v1` contract in
 `protocol/openapi.yaml`.

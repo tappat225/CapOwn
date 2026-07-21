@@ -21,6 +21,7 @@ type Section struct {
 	Port                    int      `toml:"port"`
 	DBPath                  string   `toml:"db_path"`
 	PublicURL               string   `toml:"public_url"`
+	RegistryPath            string   `toml:"registry_path"`
 	HeartbeatTimeout        int      `toml:"heartbeat_timeout"`
 	SessionTTL              int      `toml:"session_ttl"`
 	ChallengeTTL            int      `toml:"challenge_ttl"`
@@ -47,6 +48,7 @@ func DefaultConfig() *Config {
 			Port:                    9230,
 			DBPath:                  "./data/master.db",
 			PublicURL:               "",
+			RegistryPath:            "",
 			HeartbeatTimeout:        60,
 			SessionTTL:              28800,
 			ChallengeTTL:            300,
@@ -115,6 +117,9 @@ func Load(path string) *Config {
 	}
 	if v := os.Getenv("CAPOWN_MASTER_LOG_LEVEL"); v != "" {
 		cfg.Master.LogLevel = v
+	}
+	if v := os.Getenv("CAPOWN_MASTER_REGISTRY_PATH"); v != "" {
+		cfg.Master.RegistryPath = v
 	}
 
 	// Validate critical values

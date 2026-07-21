@@ -12,6 +12,7 @@ import { getPlatformInfo } from "./platform.js";
 import { PluginManager } from "./plugins/manager.js";
 import { PluginError, PluginErrorCodes } from "./plugins/errors.js";
 import type { WorkerJob, PluginCallParams, PluginSetEnabledParams, TaskResultReport } from "./protocol.js";
+import type { InstallParams, UninstallParams } from "./plugins/installer.js";
 
 // Backoff limits for reconnection
 const BACKOFF_BASE_MS = 1_000;
@@ -369,6 +370,102 @@ export class WorkerRunner {
         } catch (error) {
           const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
           const message = error instanceof PluginError ? error.safeMessage : "failed to update plugin state";
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "failed",
+            error: { code, message, details: null },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        }
+        return;
+      }
+      if (job.task_type === "plugin_install") {
+        const startedAt = new Date().toISOString();
+        const accepted = await this._reportTaskResult(job.task_id, {
+          task_id: job.task_id,
+          delivery_id: job.delivery_id,
+          worker_id: this._identity.workerId,
+          status: "running",
+          started_at: startedAt,
+          truncated: false,
+        });
+        if (!accepted) return;
+        const params = job.params as unknown as InstallParams;
+        try {
+          if (typeof params.plugin_id !== "string" || typeof params.package_url !== "string") {
+            throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin install parameters are invalid");
+          }
+          const plugin = await this._pluginManager.install(params);
+          await this._client.reportRuntime(
+            this._identity.workerId,
+            this._pluginManager.getPluginSnapshots(),
+            this._pluginManager.capabilities,
+          );
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "completed",
+            result: { is_error: false, content: [], structured_content: plugin },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        } catch (error) {
+          const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
+          const message = error instanceof PluginError ? error.safeMessage : "plugin installation failed";
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "failed",
+            error: { code, message, details: null },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        }
+        return;
+      }
+      if (job.task_type === "plugin_uninstall") {
+        const startedAt = new Date().toISOString();
+        const accepted = await this._reportTaskResult(job.task_id, {
+          task_id: job.task_id,
+          delivery_id: job.delivery_id,
+          worker_id: this._identity.workerId,
+          status: "running",
+          started_at: startedAt,
+          truncated: false,
+        });
+        if (!accepted) return;
+        const params = job.params as unknown as UninstallParams;
+        try {
+          if (typeof params.plugin_id !== "string" || params.plugin_id === "") {
+            throw new PluginError(PluginErrorCodes.PluginSchemaInvalid, "plugin uninstall parameters are invalid");
+          }
+          await this._pluginManager.uninstall(params);
+          await this._client.reportRuntime(
+            this._identity.workerId,
+            this._pluginManager.getPluginSnapshots(),
+            this._pluginManager.capabilities,
+          );
+          await this._reportTaskResult(job.task_id, {
+            task_id: job.task_id,
+            delivery_id: job.delivery_id,
+            worker_id: this._identity.workerId,
+            status: "completed",
+            result: { is_error: false, content: [], structured_content: { plugin_id: params.plugin_id, uninstalled: true } },
+            started_at: startedAt,
+            completed_at: new Date().toISOString(),
+            truncated: false,
+          });
+        } catch (error) {
+          const code = error instanceof PluginError ? error.code : PluginErrorCodes.PluginProtocolError;
+          const message = error instanceof PluginError ? error.safeMessage : "plugin uninstall failed";
           await this._reportTaskResult(job.task_id, {
             task_id: job.task_id,
             delivery_id: job.delivery_id,

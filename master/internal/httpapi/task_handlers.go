@@ -305,9 +305,28 @@ func (s *Server) handleDispatchTask(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "payload.params is required")
 		return
 	}
-	if req.Payload.TaskType != "plugin_call" {
-		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "unsupported task_type; only plugin_call is supported")
+	if req.Payload.TaskType != "plugin_call" && req.Payload.TaskType != "plugin_install" && req.Payload.TaskType != "plugin_uninstall" {
+		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "unsupported task_type; must be plugin_call, plugin_install, or plugin_uninstall")
 		return
+	}
+
+	// Registry admission check for install tasks.
+	if req.Payload.TaskType == "plugin_install" {
+		pluginID, _ := req.Payload.Params["plugin_id"].(string)
+		if pluginID == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_install")
+			return
+		}
+		if !s.registry.HasPlugin(pluginID) {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "plugin_id is not in the official registry")
+			return
+		}
+	}
+	if req.Payload.TaskType == "plugin_uninstall" {
+		if _, ok := req.Payload.Params["plugin_id"].(string); !ok || req.Payload.Params["plugin_id"] == "" {
+			writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "params.plugin_id is required for plugin_uninstall")
+			return
+		}
 	}
 
 	timeout := 120
@@ -604,4 +623,16 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toTaskResponse(canceledTask))
+}
+
+// handlePluginCatalog returns the loaded plugin registry document.
+func (s *Server) handlePluginCatalog(w http.ResponseWriter, r *http.Request) {
+	if _, apiErr := s.resolveAPI(r); apiErr != nil {
+		writeError(w, apiErr)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	w.Write(s.registry.RawJSON())
 }

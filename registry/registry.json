@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-20T00:00:00Z",
+  "plugins": [
+    {
+      "plugin_id": "filesystem",
+      "display_name": "Filesystem",
+      "description": "Read, write, and manage files on the Worker machine through MCP tools.",
+      "icon": "folder",
+      "tags": ["storage", "files"],
+      "publisher": "capown-official",
+      "source": "bundled",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "published_at": "2026-07-20T00:00:00Z",
+          "package_url": "",
+          "sha256": "",
+          "requires": {
+            "node": ">=20.18.0"
+          },
+          "manifest": {
+            "schema_version": 1,
+            "plugin_id": "filesystem",
+            "version": "0.1.0",
+            "display_name": "Filesystem",
+            "description": "Third-party MCP filesystem server installed with CapOwn Worker.",
+            "kind": "mcp",
+            "transport": "stdio",
+            "enabled": true,
+            "command": ["node", "{{install_dir}}/dist/index.js", "{{workspace}}"],
+            "env": {},
+            "permissions": {
+              "network": "none",
+              "read_roots": ["{{workspace}}"],
+              "write_roots": ["{{workspace}}"]
+            },
+            "limits": {
+              "startup_timeout_seconds": 15,
+              "call_timeout_seconds": 60,
+              "max_argument_bytes": 200000,
+              "max_output_bytes": 1000000,
+              "max_concurrency": 4
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

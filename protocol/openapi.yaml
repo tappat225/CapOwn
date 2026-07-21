@@ -706,6 +706,28 @@ paths:
         "404":
           $ref: '#/components/responses/WorkerNotFound'
 
+  /v1/plugins/catalog:
+    get:
+      tags: [plugins]
+      summary: Get the official plugin registry catalog
+      description: |
+        Returns the loaded plugin registry document. The Master loads
+        `registry/registry.json` at startup. Any authenticated client may
+        read the catalog.
+      operationId: getPluginCatalog
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, client, admin, worker]
+      responses:
+        "200":
+          description: Plugin catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginCatalog'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
   /v1/workers/{worker_id}/plugins:
     get:
       tags: [plugins, workers]
@@ -2228,6 +2250,59 @@ components:
           type: string
           description: Sanitized error message when status is `error`.
 
+    PluginCatalog:
+      type: object
+      description: The official plugin registry document loaded by the Master.
+      properties:
+        schema_version:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+        plugins:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginCatalogEntry'
+
+    PluginCatalogEntry:
+      type: object
+      properties:
+        plugin_id:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        icon:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        publisher:
+          type: string
+        source:
+          type: string
+          enum: [bundled, registry]
+        versions:
+          type: array
+          items:
+            type: object
+            properties:
+              version:
+                type: string
+              published_at:
+                type: string
+                format: date-time
+              package_url:
+                type: string
+              sha256:
+                type: string
+              requires:
+                type: object
+              manifest:
+                type: object
+
     TaskId:
       type: string
       pattern: '^tsk_[0-9a-f]{24}$'
@@ -2255,7 +2330,7 @@ components:
           properties:
             task_type:
               type: string
-              const: plugin_call
+              enum: [plugin_call, plugin_install, plugin_uninstall]
             params:
               type: object
         timeout_seconds:
