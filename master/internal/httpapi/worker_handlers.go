@@ -13,7 +13,6 @@ import (
 // Worker registration request
 type workerRegisterRequest struct {
 	RegistrationToken string   `json:"registration_token"`
-	WorkerName        string   `json:"worker_name"`
 	PublicKey         string   `json:"public_key"`
 	Hostname          string   `json:"hostname"`
 	OS                string   `json:"os"`
@@ -55,22 +54,12 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "registration_token is required")
 		return
 	}
-	if req.WorkerName == "" {
-		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "worker_name is required")
-		return
-	}
 	if req.PublicKey == "" {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "public_key is required")
 		return
 	}
 	if !auth.ValidEd25519PublicKey(req.PublicKey) {
 		writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "public_key must be a 32-byte Ed25519 key encoded as hex")
-		return
-	}
-
-	// Validate worker name
-	if msg := domain.ValidateWorkerName(req.WorkerName); msg != "" {
-		writeErrorCode(w, http.StatusBadRequest, domain.ErrWorkerNameInvalid, msg)
 		return
 	}
 
@@ -83,8 +72,8 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 	workspace := req.Workspace
 
 	// Atomic registration
-	workerID, errCode, err := s.store.RegisterWorkerAtomic(
-		req.RegistrationToken, req.WorkerName, req.Hostname, req.PublicKey,
+	result, errCode, err := s.store.RegisterWorkerAtomic(
+		req.RegistrationToken, req.Hostname, req.PublicKey,
 		req.OS, mode, capStr, workspace,
 	)
 	if err != nil {
@@ -95,8 +84,8 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 			writeErrorCode(w, http.StatusUnauthorized, domain.ErrRegistrationExpired, "registration token expired")
 		case "registration_exhausted":
 			writeErrorCode(w, http.StatusConflict, domain.ErrRegistrationExhausted, "registration token exhausted")
-		case "conflict":
-			writeErrorCode(w, http.StatusConflict, domain.ErrConflict, "worker name already taken")
+		case "registration_superseded":
+			writeErrorCode(w, http.StatusConflict, domain.ErrConflict, "registration was superseded by a newer registration")
 		default:
 			slog.Error("registration failed", "error", err)
 			writeError(w, domain.ErrInternalResponse)
@@ -104,18 +93,33 @@ func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Notify dashboard
-	owner, _ := s.store.GetOwner(workerID)
-	if owner != nil {
-		s.dashBus.PublishWorker(owner.UserID, "worker.registered", map[string]interface{}{
-			"worker_id":   workerID,
-			"worker_name": req.WorkerName,
+	for _, old := range result.Superseded {
+		s.challenges.RevokeWorker(old.WorkerID)
+		s.workerSessions.RevokeWorker(old.WorkerID)
+		s.taskStore.BlockWorker(old.WorkerID)
+		s.dashBus.PublishWorker(old.OwnerUserID, "worker.revoked", map[string]string{
+			"worker_id": old.WorkerID,
 		})
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"worker_id":   workerID,
-		"worker_name": req.WorkerName,
+	if result.Created {
+		// Notify dashboard only when a new Worker record was created.
+		owner, _ := s.store.GetOwner(result.WorkerID)
+		if owner != nil {
+			s.dashBus.PublishWorker(owner.UserID, "worker.registered", map[string]interface{}{
+				"worker_id":   result.WorkerID,
+				"worker_name": result.WorkerName,
+			})
+		}
+	}
+
+	status := http.StatusCreated
+	if !result.Created {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]string{
+		"worker_id":   result.WorkerID,
+		"worker_name": result.WorkerName,
 	})
 }
 

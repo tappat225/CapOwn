@@ -8,7 +8,7 @@ import * as os from "node:os";
 import { spawn } from "node:child_process";
 import * as TOML from "toml";
 import { log } from "./logging.js";
-import { WorkerRunner, makeWorkerNameSlug } from "./runner.js";
+import { WorkerRunner } from "./runner.js";
 import { loadConfig, writeConfigFile, type WorkerConfig } from "./config.js";
 import {
   loadOrGenerateIdentity,
@@ -16,7 +16,6 @@ import {
   parseIdentityFile,
 } from "./identity.js";
 import { MasterClient } from "./master-client.js";
-import { getPlatformInfo } from "./platform.js";
 import {
   getWorkerProcessInfo,
   requestWorkerStop,
@@ -35,7 +34,6 @@ export interface CliArgs {
   command: string;
   config?: string;
   identity?: string;
-  name?: string;
   link?: string;
   foreground?: boolean;
   backgroundChild?: boolean;
@@ -53,8 +51,6 @@ export function parseArgs(argv: string[]): CliArgs {
       args.config = argv[++i];
     } else if (a === "--identity" && i + 1 < argv.length) {
       args.identity = argv[++i];
-    } else if (a === "--name" && i + 1 < argv.length) {
-      args.name = argv[++i];
     } else if (a === "--lines" && i + 1 < argv.length) {
       args.lines = Number(argv[++i]);
     } else if (a === "--no-follow") {
@@ -97,7 +93,7 @@ function printHelp(): void {
     "  capown-worker [command] [options]",
     "",
     "Commands:",
-    "  register <link> [--name <name>]  Register this worker with a Master",
+    "  register <link>                 Register this worker with a Master",
     "  start                            Start the Worker in the background (default)",
     "  start --foreground               Run the Worker in the current terminal",
     "  status                           Show registration and process status",
@@ -110,7 +106,6 @@ function printHelp(): void {
     "Options:",
     "  --config <path>  Path to config TOML file",
     "  --identity <path> Path to identity TOML file",
-    "  --name <name>    Worker name (for register command)",
     "  --lines <count>  Number of log lines to show",
     "  --no-follow      Show recent logs and exit",
     "  -f, --foreground Run start in the current terminal",
@@ -183,7 +178,7 @@ export function parseRegistrationLink(link: string): ParsedLink | string {
 async function handleRegister(args: CliArgs): Promise<number> {
   if (!args.link) {
     process.stderr.write("error: registration link is required\n");
-    process.stderr.write("usage: capown-worker register <link> [--name <name>]\n");
+    process.stderr.write("usage: capown-worker register <link>\n");
     return 1;
   }
 
@@ -206,24 +201,16 @@ async function handleRegister(args: CliArgs): Promise<number> {
   const resolvedConfigPath = path.resolve(configPath);
   const resolvedIdentityPath = path.resolve(identityPath);
 
+  const processInfo = await getWorkerProcessInfo(resolvedConfigPath);
+  if (processInfo.status !== "stopped") {
+    process.stderr.write(
+      `error: stop the running Worker before registering it again (${processInfo.status})\n`,
+    );
+    return 1;
+  }
+
   // Load or generate identity (generates keypair if missing)
   const identity = loadOrGenerateIdentity(resolvedIdentityPath);
-
-  // Determine worker name
-  let workerName = args.name;
-  if (!workerName) {
-    try {
-      const existingConfig = loadConfig({ configPath: resolvedConfigPath, identityPath: resolvedIdentityPath });
-      if (existingConfig.worker_name && existingConfig.worker_name !== "my-worker") {
-        workerName = existingConfig.worker_name;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  if (!workerName) {
-    workerName = makeWorkerNameSlug(getPlatformInfo().hostname);
-  }
 
   process.stdout.write("Registering worker with Master at " + parsed.masterUrl + "\n");
 
@@ -231,12 +218,11 @@ async function handleRegister(args: CliArgs): Promise<number> {
   const client = new MasterClient({ masterUrl: parsed.masterUrl });
   const result = await client.register(
     parsed.registrationToken,
-    workerName,
     identity.publicKeyHex,
   );
 
-  if (!result) {
-    process.stderr.write("error: registration failed\n");
+  if (!result.ok) {
+    process.stderr.write("error: registration failed: " + result.message + "\n");
     return 1;
   }
 

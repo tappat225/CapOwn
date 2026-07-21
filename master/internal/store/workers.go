@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/capown/master/internal/domain"
@@ -53,6 +54,7 @@ func (s *Store) RegisterWorker(
 	workerID, workerName, ownerUserID, hostname, publicKey, osName, mode, capabilities, workspace string,
 ) error {
 	now := NowISO()
+	publicKey = strings.ToLower(strings.TrimSpace(publicKey))
 	_, err := s.db.Exec(
 		`INSERT INTO workers (worker_id, worker_name, owner_user_id, public_key, hostname, os, mode, capabilities, workspace, status, registered_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?)`,

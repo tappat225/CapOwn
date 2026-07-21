@@ -90,38 +90,71 @@ describe("MasterClient", () => {
       path: "/v1/workers",
       status: 201,
       body: { worker_id: "wrk_test123", worker_name: "test-worker" },
+      match: (body) => {
+        const request = body as Record<string, unknown>;
+        return request.registration_token === "cown_register_valid" &&
+          request.public_key === "a".repeat(64) &&
+          !("worker_name" in request);
+      },
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
     const result = await client.register(
       "cown_register_valid",
-      "test-worker",
       "a".repeat(64),
     );
 
-    assert.ok(result !== null);
-    assert.equal(result!.workerId, "wrk_test123");
-    assert.equal(result!.workerName, "test-worker");
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.workerId, "wrk_test123");
+    assert.equal(result.workerName, "test-worker");
   });
 
-  it("register returns null on 409 conflict", async () => {
+  it("register accepts an idempotent existing-worker response", async () => {
     addHandler({
       method: "POST",
       path: "/v1/workers",
-      status: 409,
-      body: { error: { code: "conflict", message: "name taken", details: null } },
+      status: 200,
+      body: { worker_id: "wrk_existing", worker_name: "existing-worker" },
     });
 
     const client = new MasterClient({ masterUrl: MASTER_URL });
     const result = await client.register(
-      "cown_register_test",
-      "taken-name",
-      "b".repeat(64),
+      "cown_register_retry",
+      "a".repeat(64),
     );
-    assert.equal(result, null);
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.workerId, "wrk_existing");
+    assert.equal(result.workerName, "existing-worker");
   });
 
-  it("register returns null on 401 invalid token", async () => {
+  it("register returns error when a registration was superseded", async () => {
+    addHandler({
+      method: "POST",
+      path: "/v1/workers",
+      status: 409,
+      body: {
+        error: {
+          code: "conflict",
+          message: "registration was superseded by a newer registration",
+          details: null,
+        },
+      },
+    });
+
+    const client = new MasterClient({ masterUrl: MASTER_URL });
+    const result = await client.register(
+      "cown_register_superseded",
+      "b".repeat(64),
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.message, /registration was superseded/);
+  });
+
+  it("register returns error on 401 invalid token", async () => {
     addHandler({
       method: "POST",
       path: "/v1/workers",
@@ -132,20 +165,20 @@ describe("MasterClient", () => {
     const client = new MasterClient({ masterUrl: MASTER_URL });
     const result = await client.register(
       "cown_register_bad",
-      "bad-token",
       "c".repeat(64),
     );
-    assert.equal(result, null);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.message, /invalid/);
   });
 
-  it("register returns null on network error", async () => {
+  it("register returns error on network error", async () => {
     const client = new MasterClient({ masterUrl: MASTER_URL });
     const result = await client.register(
       "cown_register_net",
-      "net-error",
       "d".repeat(64),
     );
-    assert.equal(result, null);
+    assert.equal(result.ok, false);
   });
 
   // ------------------------------------------------------------------

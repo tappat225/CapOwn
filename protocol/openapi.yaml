@@ -528,6 +528,12 @@ paths:
             schema:
               $ref: '#/components/schemas/WorkerRegistrationRequest'
       responses:
+        "200":
+          description: Existing Worker returned for a retry with the same registration token and public key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerRegistrationResponse'
         "201":
           description: Worker registered.
           content:
@@ -1452,7 +1458,9 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     RegistrationConflict:
-      description: Registration token is exhausted or worker name conflicts.
+      description: >
+        Registration token is exhausted or the registration was superseded by a
+        newer registration using the same token and public key.
       content:
         application/json:
           schema:
@@ -1813,7 +1821,7 @@ components:
         max_uses:
           type: integer
           minimum: 1
-          default: 1
+          default: 10
 
     RegistrationTokenView:
       type: object
@@ -1904,12 +1912,11 @@ components:
     WorkerRegistrationRequest:
       type: object
       additionalProperties: false
-      required: [registration_token, worker_name, public_key, hostname, os, mode, capabilities, workspace]
+      description: Master assigns the worker_name returned in the response.
+      required: [registration_token, public_key, hostname, os, mode, capabilities, workspace]
       properties:
         registration_token:
           type: string
-        worker_name:
-          $ref: '#/components/schemas/WorkerName'
         public_key:
           type: string
           pattern: '^[0-9a-fA-F]{64}$'

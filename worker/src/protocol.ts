@@ -7,7 +7,6 @@
 
 export interface WorkerRegistrationRequest {
   registration_token: string;
-  worker_name: string;
   public_key: string;
   hostname: string;
   os: string;

@@ -15,6 +15,17 @@ made before `1.0.0`.
 
 ## 0.1.1 - 2026-07-21
 
+`POST /v1/workers` treats an Ed25519 `public_key` as the Worker's local
+installation identity. A new registration token creates a new `worker_id` even
+when the key was previously registered, and supersedes the prior active
+registration for that key. Repeating the same token and key is idempotent and
+returns `200` with the original registration result without consuming another
+token use while that registration remains active. Registration tokens default
+to 10 uses so one link supports a
+multi-Worker deployment. Worker names are assigned by Master, preserving the
+latest name for known keys and deriving a unique name from the reported
+hostname for new keys.
+
 Breaking change (pre-1.0, updated together): tighten `plugin_install`
 semantics.
 
