@@ -75,6 +75,13 @@ Write-Output "npm version:     $npmVersion"
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 
+# --- Sync version metadata in the monorepo before copy ---
+Write-Output ""
+Write-Output "Synchronizing Worker version metadata..."
+$VersionScript = Join-Path $PSScriptRoot "version.mjs"
+& node $VersionScript sync-worker
+if ($LASTEXITCODE -ne 0) { throw "version sync failed" }
+
 # --- Copy and build in a fresh staging directory ---
 Write-Output ""
 Write-Output "Copying Worker source..."
