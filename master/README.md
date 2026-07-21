@@ -1,6 +1,6 @@
 # CapOwn Master -- Go Implementation
 
-Next-generation Master server for CapOwn, written in Go.
+Master server for CapOwn, written in Go.
 
 The current `/v1` wire contract is defined centrally in
 [`../protocol/openapi.yaml`](../protocol/openapi.yaml). Master endpoints must

@@ -8,7 +8,7 @@ info:
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
     via the `plugin_call` task type. It also defines the authenticated
-    next-only MCP Streamable HTTP interface at `/mcp`. Workers claim jobs via
+    MCP Streamable HTTP interface at `/mcp`. Workers claim jobs via
     long-poll and report runtime heartbeats separately. Dashboard events use SSE.
   license:
     name: Apache-2.0
@@ -81,7 +81,7 @@ paths:
       tags: [mcp]
       summary: MCP Streamable HTTP endpoint
       description: |
-        Stateless JSON MCP endpoint for next Master tools. Every request
+        Stateless JSON MCP endpoint for Master tools. Every request
         requires a bearer token whose token type is `client`. Clients MUST
         advertise both `application/json` and `text/event-stream` in the
         `Accept` header. The current implementation returns JSON responses and

@@ -8,7 +8,7 @@ services:
       args:
         CAPOWN_PRODUCT_VERSION: "${CAPOWN_PRODUCT_VERSION:-}"
         CAPOWN_PROTOCOL_VERSION: "${CAPOWN_PROTOCOL_VERSION:-}"
-    image: "capown-master:${CAPOWN_PRODUCT_VERSION:-next}"
+    image: "capown-master:${CAPOWN_PRODUCT_VERSION:-latest}"
     ports:
       - "${MASTER_PORT:-9230}:9230"
     environment:

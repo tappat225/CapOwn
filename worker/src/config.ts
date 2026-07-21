@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="node" />
-/** Configuration loading, resolution, and validation for Worker Next. */
+/** Configuration loading, resolution, and validation. */
 
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -11,7 +11,7 @@ import { z } from "zod";
 import { log } from "./logging.js";
 
 // --------------------------------------------------------------------------
-// Zod schema for Worker Next config
+// Zod schema for Worker config
 // --------------------------------------------------------------------------
 
 const ConfigSchema = z.object({
@@ -41,7 +41,7 @@ const ConfigSchema = z.object({
 // Config interface
 // --------------------------------------------------------------------------
 
-export interface WorkerNextConfig {
+export interface WorkerConfig {
   readonly master_url: string;
   readonly worker_name: string;
   readonly worker_id: string;
@@ -58,7 +58,6 @@ export interface WorkerNextConfig {
 function defaultConfigPath(): string {
   // Check env vars in priority order
   const env =
-    process.env["CAPOWN_WORKER_NEXT_CONFIG"] ??
     process.env["CAPOWN_WORKER_CONFIG"] ??
     process.env["CAPOWN_CONFIG"];
 
@@ -121,7 +120,7 @@ function parseTomlFile(filePath: string): FlatToml {
 // Write config to TOML file
 // --------------------------------------------------------------------------
 
-export function writeConfigFile(filePath: string, config: Partial<WorkerNextConfig>): void {
+export function writeConfigFile(filePath: string, config: Partial<WorkerConfig>): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -156,7 +155,7 @@ export interface LoadConfigOptions {
   identityPath?: string;
 }
 
-export function loadConfig(opts?: LoadConfigOptions): WorkerNextConfig {
+export function loadConfig(opts?: LoadConfigOptions): WorkerConfig {
   const configPath = opts?.configPath
     ? path.resolve(opts.configPath)
     : defaultConfigPath();
@@ -182,7 +181,7 @@ export function loadConfig(opts?: LoadConfigOptions): WorkerNextConfig {
   const foundLegacy = legacyKeys.filter((k) => k in raw);
   if (foundLegacy.length > 0) {
     log.info(
-      "config: ignoring legacy execution keys (Worker Next does not use them): %s",
+      "config: ignoring legacy execution keys: %s",
       foundLegacy.join(", "),
     );
   }

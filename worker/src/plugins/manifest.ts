@@ -28,7 +28,7 @@ const LIMIT_KEYS = new Set([
   "max_output_bytes", "max_concurrency",
 ]);
 const RESERVED_WORKER_ENV = new Set([
-  "CAPOWN_CONFIG", "CAPOWN_WORKER_CONFIG", "CAPOWN_WORKER_NEXT_CONFIG",
+  "CAPOWN_CONFIG", "CAPOWN_WORKER_CONFIG",
   "CAPOWN_WORKER_IDENTITY",
 ]);
 

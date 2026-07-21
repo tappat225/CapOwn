@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CapOwn Next E2E test — Master + Worker + fake MCP plugin.
+"""CapOwn E2E test — Master + Worker + fake MCP plugin.
 
 Usage:
     python tests/e2e/run_e2e.py

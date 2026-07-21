@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# Worker Next example configuration.
-# Copy to ~/.capown/worker/config.toml or set CAPOWN_WORKER_NEXT_CONFIG.
+# Worker example configuration.
+# Copy to ~/.capown/worker/config.toml or set CAPOWN_WORKER_CONFIG.
 
 role = "worker"
 master_url = "https://master.example.com:9230"
 
-# Legacy [worker] section keys that are NOT used by Worker Next
-# (execution_mode, container_name, workspace, etc.) are silently ignored.
+# Legacy [worker] section keys (execution_mode, container_name, workspace, etc.)
+# are silently ignored.
 [worker]
 reconnect_interval = 5

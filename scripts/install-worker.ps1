@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    CapOwn Worker Next local source installation (Windows).
+    CapOwn Worker local source installation (Windows).
 .DESCRIPTION
     Installs the Worker from the local repository into ~/.capown/worker/.
     Does not create Windows services. Does not auto-register with a Master.
@@ -35,8 +35,8 @@ $ConfigFile = Join-Path $ConfigDir "config.toml"
 $IdentityFile = Join-Path $ConfigDir "identity.toml"
 $Launcher = Join-Path $BinDir "capown-worker.cmd"
 
-Write-Output "CapOwn Worker Next Installer"
-Write-Output "============================"
+Write-Output "CapOwn Worker Installer"
+Write-Output "========================"
 Write-Output ""
 Write-Output "Prefix:  $Prefix"
 Write-Output "Source:  $WorkerSrc"
@@ -116,7 +116,7 @@ Write-Output ""
 Write-Output "Creating launcher: $Launcher"
 @"
 @echo off
-REM CapOwn Worker Next launcher
+REM CapOwn Worker launcher
 set "CAPOWN_WORKER_DIR=%~dp0..\worker"
 node "%CAPOWN_WORKER_DIR%\app\dist\src\cli.js" --config "%CAPOWN_WORKER_DIR%\config.toml" --identity "%CAPOWN_WORKER_DIR%\identity.toml" %*
 "@ | Out-File -FilePath $Launcher -Encoding ascii
