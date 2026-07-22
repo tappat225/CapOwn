@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { loadManifests } from "./manifest.js";
 import { PluginRegistry } from "./registry.js";
-import type { PluginInfo, PluginCallResult, ContentBlock } from "./types.js";
+import type {
+  PluginInfo,
+  PluginCallResult,
+  ContentBlock,
+  ResourceContent,
+} from "./types.js";
 import { PluginError, PluginErrorCodes } from "./errors.js";
 import { provisionDefaultPlugins } from "./defaults.js";
 import { installPlugin, uninstallPlugin } from "./installer.js";
@@ -214,6 +219,37 @@ export class PluginManager {
       }
       if (block.type === "text" && typeof block.text === "string") {
         return { type: "text" as const, text: block.text };
+      }
+      if (
+        (block.type === "image" || block.type === "audio") &&
+        typeof block.data === "string" &&
+        typeof block.mimeType === "string"
+      ) {
+        return {
+          type: block.type,
+          data: block.data,
+          mime_type: block.mimeType,
+        };
+      }
+      if (block.type === "resource" && block.resource) {
+        const resource = block.resource;
+        const hasText = typeof resource.text === "string";
+        const hasBlob = typeof resource.blob === "string";
+        if (
+          typeof resource.uri === "string" &&
+          (hasText !== hasBlob)
+        ) {
+          const normalized: ResourceContent = { uri: resource.uri };
+          if (typeof resource.mimeType === "string") {
+            normalized.mime_type = resource.mimeType;
+          }
+          if (hasText) {
+            normalized.text = resource.text;
+          } else {
+            normalized.blob = resource.blob;
+          }
+          return { type: "resource" as const, resource: normalized };
+        }
       }
       throw new PluginError(
         PluginErrorCodes.PluginProtocolError,

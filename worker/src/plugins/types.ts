@@ -84,26 +84,45 @@ export interface McpTool {
   inputSchema?: Record<string, unknown>;
 }
 
+export interface McpEmbeddedResource {
+  uri: string;
+  mimeType?: string;
+  text?: string;
+  blob?: string;
+}
+
+export interface McpContentBlock {
+  type: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+  resource?: McpEmbeddedResource;
+}
+
 export interface McpCallToolResult {
-  content: Array<{
-    type: string;
-    text?: string;
-    data?: string;
-    mimeType?: string;
-    resource?: unknown;
-  }>;
+  content: McpContentBlock[];
   isError?: boolean;
   structuredContent?: Record<string, unknown> | unknown[];
 }
 
 // --------------------------------------------------------------------------
-// Result content blocks (protocol v1.5)
+// Result content blocks
 // --------------------------------------------------------------------------
 
+export interface ResourceContent {
+  uri: string;
+  mime_type?: string;
+  text?: string;
+  blob?: string;
+}
+
 export interface ContentBlock {
-  type: "text" | "json";
+  type: "text" | "json" | "image" | "audio" | "resource";
   text?: string;
   value?: unknown;
+  data?: string;
+  mime_type?: string;
+  resource?: ResourceContent;
 }
 
 export interface PluginCallResult {

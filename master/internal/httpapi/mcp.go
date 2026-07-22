@@ -61,8 +61,18 @@ type mcpToolCallResult struct {
 }
 
 type mcpContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	Data     string       `json:"data,omitempty"`
+	MimeType string       `json:"mimeType,omitempty"`
+	Resource *mcpResource `json:"resource,omitempty"`
+}
+
+type mcpResource struct {
+	URI      string  `json:"uri"`
+	MimeType string  `json:"mimeType,omitempty"`
+	Text     *string `json:"text,omitempty"`
+	Blob     *string `json:"blob,omitempty"`
 }
 
 type mcpToolFailure struct {
@@ -657,15 +667,27 @@ func mcpPluginResult(task *domain.Task) mcpToolCallResult {
 	}
 	result := mcpToolCallResult{IsError: pluginResult.IsError}
 	for _, block := range pluginResult.Content {
-		if block.Type == "json" {
+		switch block.Type {
+		case "json":
 			encoded, err := json.Marshal(block.Value)
 			if err != nil {
 				encoded = []byte("null")
 			}
 			result.Content = append(result.Content, mcpContent{Type: "text", Text: string(encoded)})
-			continue
+		case "image", "audio":
+			result.Content = append(result.Content, mcpContent{
+				Type:     block.Type,
+				Data:     block.Data,
+				MimeType: block.MIMEType,
+			})
+		case "resource":
+			result.Content = append(result.Content, mcpContent{
+				Type:     block.Type,
+				Resource: mcpResourceFromDomain(block.Resource),
+			})
+		default:
+			result.Content = append(result.Content, mcpContent{Type: "text", Text: block.Text})
 		}
-		result.Content = append(result.Content, mcpContent{Type: "text", Text: block.Text})
 	}
 	if len(result.Content) == 0 {
 		result.Content = []mcpContent{{Type: "text", Text: ""}}
@@ -674,4 +696,16 @@ func mcpPluginResult(task *domain.Task) mcpToolCallResult {
 		result.StructuredContent = pluginResult.StructuredContent
 	}
 	return result
+}
+
+func mcpResourceFromDomain(resource *domain.ResourceContent) *mcpResource {
+	if resource == nil {
+		return nil
+	}
+	return &mcpResource{
+		URI:      resource.URI,
+		MimeType: resource.MIMEType,
+		Text:     resource.Text,
+		Blob:     resource.Blob,
+	}
 }

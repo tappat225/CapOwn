@@ -153,10 +153,20 @@ export interface PluginUninstallParams {
   plugin_id: string;
 }
 
+export interface ResourceContent {
+  uri: string;
+  mime_type?: string;
+  text?: string;
+  blob?: string;
+}
+
 export interface ContentBlock {
-  type: "text" | "json";
+  type: "text" | "json" | "image" | "audio" | "resource";
   text?: string;
   value?: unknown;
+  data?: string;
+  mime_type?: string;
+  resource?: ResourceContent;
 }
 
 export interface PluginCallResult {
