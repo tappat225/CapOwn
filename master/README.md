@@ -34,6 +34,24 @@ mapping; the Master still listens on port `9230` inside the container:
 MASTER_PORT=9320 docker compose up -d --build
 ```
 
+In mainland China or another network with limited access to the default
+registries, override the build sources through environment variables. The
+image variables must contain complete image references. `ALPINE_MIRROR` must
+contain the Alpine repository base without a scheme, such as
+`mirrors.aliyun.com/alpine`:
+
+```bash
+GO_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/golang:1.23-alpine \
+ALPINE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/alpine:3.19 \
+ALPINE_MIRROR=mirrors.aliyun.com/alpine \
+GOPROXY=https://goproxy.cn,direct \
+docker compose up -d --build
+```
+
+The defaults remain `golang:1.23-alpine`, `alpine:3.19`, the official Alpine
+repository, and `https://proxy.golang.org,direct`. These variables affect the
+image build only; they are not passed to the running Master.
+
 For a public or reverse-proxied deployment, set
 `CAPOWN_MASTER_PUBLIC_URL` to the Dashboard-visible Master URL.
 

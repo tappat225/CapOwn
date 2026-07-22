@@ -38,6 +38,10 @@ SQLite database live under `~/.capown/master`; on Windows the default is
 `%USERPROFILE%\.capown\master`. Set `CAPOWN_MASTER_DIR` when Docker cannot
 resolve the intended home directory.
 
+When the default registries are not reachable, provide alternate build sources
+through `GO_IMAGE`, `ALPINE_IMAGE`, `ALPINE_MIRROR`, and `GOPROXY` before the
+same Compose command. See [Deployment](deployment.md) for an example.
+
 Check the process:
 
 ```bash

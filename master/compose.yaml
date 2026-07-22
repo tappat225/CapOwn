@@ -6,6 +6,10 @@ services:
       context: ..
       dockerfile: master/Dockerfile
       args:
+        GO_IMAGE: "${GO_IMAGE:-golang:1.23-alpine}"
+        ALPINE_IMAGE: "${ALPINE_IMAGE:-alpine:3.19}"
+        ALPINE_MIRROR: "${ALPINE_MIRROR:-}"
+        GOPROXY: "${GOPROXY:-https://proxy.golang.org,direct}"
         CAPOWN_PRODUCT_VERSION: "${CAPOWN_PRODUCT_VERSION:-}"
         CAPOWN_PROTOCOL_VERSION: "${CAPOWN_PROTOCOL_VERSION:-}"
     image: "capown-master:${CAPOWN_PRODUCT_VERSION:-latest}"

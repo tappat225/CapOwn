@@ -18,6 +18,22 @@ port `9230` and mounts `${CAPOWN_MASTER_DIR:-$HOME/.capown/master}` at
 `/data`. Configuration is created at `/data/config.toml`; the database is at
 `/data/data/master.db`.
 
+Build source overrides are available for networks that cannot reliably reach
+the default public registries. Set `GO_IMAGE` and `ALPINE_IMAGE` to complete
+image references, `ALPINE_MIRROR` to an Alpine repository base without a
+scheme, and `GOPROXY` to a Go module proxy:
+
+```bash
+GO_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/golang:1.23-alpine \
+ALPINE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/alpine:3.19 \
+ALPINE_MIRROR=mirrors.aliyun.com/alpine \
+GOPROXY=https://goproxy.cn,direct \
+docker compose up -d --build
+```
+
+All four variables are build-time settings. The defaults preserve the current
+official Go image, Alpine image, Alpine repository, and Go module proxy.
+
 Useful operations:
 
 ```bash

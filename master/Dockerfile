@@ -1,8 +1,15 @@
-FROM golang:1.23-alpine AS builder
+ARG GO_IMAGE=golang:1.23-alpine
+ARG ALPINE_IMAGE=alpine:3.19
+ARG ALPINE_MIRROR=""
+ARG GOPROXY=https://proxy.golang.org,direct
+
+FROM ${GO_IMAGE} AS builder
+
+ARG GOPROXY
 
 WORKDIR /src/master
 COPY master/go.mod master/go.sum ./
-RUN go mod download
+RUN GOPROXY="${GOPROXY}" go mod download
 
 COPY master/ ./
 COPY version.json /src/version.json
@@ -12,10 +19,14 @@ RUN PRODUCT_VERSION="$(go run ./cmd/capown-version --manifest /src/version.json 
       -ldflags "-X github.com/capown/master/internal/version.ProductVersion=${PRODUCT_VERSION} -X github.com/capown/master/internal/version.ProtocolVersion=${PROTOCOL_VERSION}" \
       -o /capown-master ./cmd/capown-master
 
-FROM alpine:3.19
+FROM ${ALPINE_IMAGE}
 ARG CAPOWN_PRODUCT_VERSION
 ARG CAPOWN_PROTOCOL_VERSION
-RUN apk add --no-cache ca-certificates tzdata
+ARG ALPINE_MIRROR
+RUN if [ -n "${ALPINE_MIRROR}" ]; then \
+      sed -i "s|dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache ca-certificates tzdata
 COPY --from=builder /capown-master /usr/local/bin/capown-master
 COPY master/config.toml.example /opt/capown/config.toml.example
 COPY registry/ /opt/capown/registry/
