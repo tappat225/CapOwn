@@ -10,9 +10,10 @@ services:
         ALPINE_IMAGE: "${ALPINE_IMAGE:-alpine:3.19}"
         ALPINE_MIRROR: "${ALPINE_MIRROR:-}"
         GOPROXY: "${GOPROXY:-https://proxy.golang.org,direct}"
-        CAPOWN_PRODUCT_VERSION: "${CAPOWN_PRODUCT_VERSION:-}"
-        CAPOWN_PROTOCOL_VERSION: "${CAPOWN_PROTOCOL_VERSION:-}"
-    image: "capown-master:${CAPOWN_PRODUCT_VERSION:-latest}"
+        CAPOWN_MASTER_VERSION: "${CAPOWN_MASTER_VERSION:-dev}"
+        CAPOWN_PROTOCOL_VERSION: "${CAPOWN_PROTOCOL_VERSION:-dev}"
+        CAPOWN_RELEASE_TAG: "${CAPOWN_RELEASE_TAG:-dev}"
+    image: "capown-master:${CAPOWN_MASTER_VERSION:-latest}"
     ports:
       - "${MASTER_PORT:-9230}:9230"
     environment:

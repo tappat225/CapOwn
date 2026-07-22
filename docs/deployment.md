@@ -61,6 +61,29 @@ allowed_dashboard_origins = ["https://dashboard.example.com"]
 `CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS` is an optional comma-separated
 environment override for automation and temporary deployments.
 
+## Dashboard deployment
+
+The Dashboard is a static SPA and remains independently deployable from the
+Master. From the repository root:
+
+```bash
+cd dashboard
+npm ci
+npm run build
+```
+
+Serve `dashboard/out/` with Nginx, Caddy, or another static file server. The
+included container can be built with:
+
+```bash
+docker compose -f dashboard/docker-compose.yml up --build -d
+```
+
+The browser calls the Master directly, so configure the exact public Dashboard
+origin in `allowed_dashboard_origins`. The Dashboard build context is
+`dashboard/`; do not use the repository root as the context for
+`dashboard/Dockerfile` unless the Dockerfile is changed accordingly.
+
 ## Local Master installation
 
 The installer builds the Go binary and creates a launcher. It does not create

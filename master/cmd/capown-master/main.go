@@ -38,7 +38,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("starting capown-master",
-		"version", version.ProductVersion,
+		"version", version.MasterVersion,
 		"addr", cfg.Master.Addr(),
 		"db", cfg.Master.DBPath,
 	)

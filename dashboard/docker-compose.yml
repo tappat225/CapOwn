@@ -1,0 +1,9 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        NPM_REGISTRY: "${NPM_REGISTRY:-}"
+    restart: unless-stopped
+    ports:
+      - "${CAPOWN_DASHBOARD_PORT:-3000}:3000"
