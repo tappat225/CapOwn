@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copy to ~/.capown/client/config.toml.
+
+role = "client"
+master_url = "http://localhost:9230"
+client_token = ""
+
+[client]
+soft_timeout = 30
