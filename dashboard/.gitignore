@@ -1,0 +1,51 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# env
+.env
+.env.local
+.env.production.local
+.env.development.local
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# turbo
+.turbo
+
+# vitest
+coverage/
+
+# Drizzle migrations are runtime inputs; keep drizzle/*.sql and drizzle/meta/*.json tracked.
+# Ignore only ad-hoc/generated snapshot exports, if present.
+drizzle/snapshots/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Generated version constants
+src/generated/
+
+# SQLite data
+.data/
+.test-data/
+
+# AI-Agents
+.agents/
+.claude/
+.codex/

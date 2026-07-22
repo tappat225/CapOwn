@@ -1,0 +1,15 @@
+# Static Dashboard hosting example.
+# The Dashboard does not proxy Master requests. Configure CORS on the Master
+# for this Dashboard origin, then serve the generated `out/` directory.
+
+server {
+    listen 80;
+    server_name dashboard.example.com;
+
+    root /var/www/capown-dashboard;
+    index index.html;
+
+    location / {
+        try_files $uri $uri.html $uri/ /index.html;
+    }
+}
