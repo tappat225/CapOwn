@@ -103,6 +103,18 @@ npm run build
 The Worker requires Node `>=20.18.0`. It can be installed from the repository
 root with `scripts/install-worker.sh` or `scripts/install-worker.ps1`.
 
+### Uninstall local components
+
+```bash
+python3 scripts/uninstall.py worker
+python3 scripts/uninstall.py --all --yes
+python3 scripts/uninstall.py master --force
+```
+
+Without `--yes` or `--force`, the script asks whether to keep the selected
+components' data. `--yes` keeps data and `--force` removes it. Dashboard is
+not managed by this script.
+
 ### Build and test the Dashboard
 
 ```bash
