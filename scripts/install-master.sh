@@ -67,9 +67,9 @@ fi
 echo "Go:     $(go version)"
 echo ""
 
-PRODUCT_VERSION="$(cd "${MASTER_SRC}" && go run ./cmd/capown-version --manifest "${VERSION_MANIFEST}" --field product_version)"
+MASTER_VERSION="$(cd "${MASTER_SRC}" && go run ./cmd/capown-version --manifest "${VERSION_MANIFEST}" --field master_version)"
 PROTOCOL_VERSION="$(cd "${MASTER_SRC}" && go run ./cmd/capown-version --manifest "${VERSION_MANIFEST}" --field protocol_version)"
-echo "Product:  ${PRODUCT_VERSION}"
+echo "Master:   ${MASTER_VERSION}"
 echo "Protocol: ${PROTOCOL_VERSION}"
 echo ""
 
@@ -79,7 +79,7 @@ echo "Building Master..."
 (
   cd "${MASTER_SRC}"
   go build \
-    -ldflags "-X github.com/capown/master/internal/version.ProductVersion=${PRODUCT_VERSION} -X github.com/capown/master/internal/version.ProtocolVersion=${PROTOCOL_VERSION}" \
+    -ldflags "-X github.com/capown/master/internal/version.MasterVersion=${MASTER_VERSION} -X github.com/capown/master/internal/version.ProtocolVersion=${PROTOCOL_VERSION}" \
     -o "${BINARY_FILE}" ./cmd/capown-master
 )
 

@@ -222,7 +222,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	initialized := s.store.CountUsers() > 0
 	writeJSON(w, http.StatusOK, MetaResponse{
 		Product:         "capown-master",
-		Version:         version.ProductVersion,
+		Version:         version.MasterVersion,
 		ProtocolVersion: version.ProtocolVersion,
 		Initialized:     initialized,
 		Capabilities:    []string{},

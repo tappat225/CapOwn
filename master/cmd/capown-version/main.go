@@ -11,8 +11,10 @@ import (
 )
 
 type manifest struct {
-	ProductVersion  string `json:"product_version"`
 	ProtocolVersion string `json:"protocol_version"`
+	Components      map[string]struct {
+		Version string `json:"version"`
+	} `json:"components"`
 }
 
 func main() {
@@ -23,8 +25,8 @@ func main() {
 	if *manifestPath == "" {
 		fail("--manifest is required")
 	}
-	if *field != "product_version" && *field != "protocol_version" {
-		fail("--field must be product_version or protocol_version")
+	if *field != "master_version" && *field != "protocol_version" {
+		fail("--field must be master_version or protocol_version")
 	}
 
 	raw, err := os.ReadFile(*manifestPath)
@@ -36,8 +38,10 @@ func main() {
 		fail("parse manifest: %v", err)
 	}
 
-	value := values.ProductVersion
-	if *field == "protocol_version" {
+	value := ""
+	if *field == "master_version" {
+		value = values.Components["master"].Version
+	} else {
 		value = values.ProtocolVersion
 	}
 	if value == "" {

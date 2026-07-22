@@ -12,6 +12,8 @@ execution documentation; it is not authoritative for this repository.
   register a Worker, and connect an MCP client.
 - [Deployment](deployment.md) - Docker Compose, local installation, persistent
   paths, reverse proxies, and operational checks.
+- [Dashboard guide](../dashboard/README.md) - Static Dashboard development,
+  deployment, browser storage, and Master CORS configuration.
 - [Architecture](architecture.md) - Control-plane and execution-plane
   boundaries, authentication, heartbeats, claims, and cancellation.
 - [MCP](mcp.md) - The current `/mcp` endpoint, client-token rules, tools, and
@@ -25,6 +27,7 @@ execution documentation; it is not authoritative for this repository.
 - [Plugin protocol](../protocol/plugin-protocol.md)
 - [Master implementation guide](../master/README.md)
 - [Worker implementation guide](../worker/README.md)
+- [Dashboard guide](../dashboard/README.md)
 
 The OpenAPI document defines routes, JSON fields, authentication classes,
 status codes, and SSE framing. Update it before changing observable behavior.

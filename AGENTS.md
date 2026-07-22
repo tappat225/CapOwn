@@ -19,6 +19,8 @@ Top-level responsibilities:
 - `worker/` - TypeScript/Node Worker for registration, Ed25519 authentication,
   runtime heartbeats, claim-based task and cancellation handling, and local
   MCP-over-stdio plugin lifecycle and execution.
+- `dashboard/` - Static Next.js Dashboard SPA for direct browser access to the
+  Master HTTP API and authenticated Dashboard event stream.
 - `protocol/` - language-independent protocol contract. OpenAPI is the
   canonical wire definition.
 
@@ -73,12 +75,14 @@ implementation-specific type file.
 
 ```bash
 node scripts/version.mjs sync-worker
+node scripts/version.mjs sync-dashboard
 node scripts/version.mjs check
 ```
 
-The repository-wide version source and release update rules are in
+The repository-wide component, protocol, and release-tag rules are in
 [`VERSIONING.md`](./VERSIONING.md). `version.json` is the only committed
-version source; do not add component-specific manual version sources.
+component and protocol version source; Git tags identify repository release
+snapshots and are not component update versions.
 
 ## Protocol-first rules
 
@@ -115,8 +119,12 @@ version source; do not add component-specific manual version sources.
 - Preserve SPDX headers and the license convention of the file being changed.
 - Keep Master, Worker, Client, and protocol code independently deployable; do
   not import implementation modules across component boundaries.
+- Keep Dashboard independently deployable; it must call Master through the
+  public protocol and must not import Master or Worker implementation modules.
 - Format Go changes with `gofmt` and keep Go tests in `*_test.go` files.
 - Keep Worker code TypeScript ESM-compatible and pass `npm run typecheck`.
+- Keep Dashboard code TypeScript ESM-compatible and pass its format, lint,
+  typecheck, test, and build checks from `dashboard/`.
 - Prefer platform and standard-library capabilities before adding a dependency.
 - Update committed `*.example` configuration files whenever configuration shape,
   environment variables, or default paths change.

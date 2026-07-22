@@ -1,7 +1,8 @@
 # AGENTS.md - CapOwn Dashboard Agent Guide
 
-Operating guide for AI coding assistants. Keep detailed feature specifications
-in `docs/` and protocol definitions in the CapOwn core repository.
+Operating guide for AI coding assistants working on the Dashboard component in
+the CapOwn monorepo. Keep detailed feature specifications in `docs/` and treat
+the root protocol document as canonical.
 
 ## Quick Commands
 
@@ -10,18 +11,18 @@ npm run dev       # Start the local development server
 npm test          # Run tests
 npm run typecheck # TypeScript check
 npm run build     # Generate the static out/ directory
-node scripts/version.mjs check # Check Dashboard version metadata
+node ../scripts/version.mjs check-dashboard # Check Dashboard version metadata
 ```
 
 ## Project Scope
 
 CapOwn Dashboard is a static SPA for operating a CapOwn Master through direct
-browser HTTP APIs. It is a separate repository. Never import from `master/` or
-`worker/` in the CapOwn core repository.
+browser HTTP APIs. It is independently deployable within this repository.
+Never import implementation modules from `master/` or `worker/`.
 
-Repository versioning rules are defined in [`VERSIONING.md`](./VERSIONING.md).
-The committed source is [`version.json`](./version.json); do not add another
-manual version source.
+Repository versioning rules are defined in the root
+[`VERSIONING.md`](../VERSIONING.md). The committed source is the root
+[`version.json`](../version.json); do not add another manual version source.
 
 ## Must
 

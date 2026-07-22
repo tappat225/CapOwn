@@ -17,8 +17,8 @@
     "predev": "npm run version:sync",
     "pretest": "npm run version:sync",
     "pretypecheck": "npm run version:sync",
-    "version:check": "node scripts/version.mjs check",
-    "version:sync": "node scripts/version.mjs sync"
+    "version:check": "node ../scripts/version.mjs check-dashboard",
+    "version:sync": "node ../scripts/version.mjs sync-dashboard"
   },
   "dependencies": {
     "next": "^15.3.0",

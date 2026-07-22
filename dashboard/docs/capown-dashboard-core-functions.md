@@ -7,9 +7,9 @@ CapOwn Master through the current `/v1` HTTP and authenticated streaming-fetch
 SSE contract. It has no backend, database, proxy, local account system, or
 server-side token storage.
 
-The Dashboard accepts only `product: capown-master` and the single protocol
-version compiled into the current release. This pre-user project does not
-implement legacy protocol compatibility.
+The Dashboard accepts only `product: capown-master` and rejects Masters below
+the generated `minimum_protocol_version`. The canonical protocol contract is
+the repository-level `protocol/openapi.yaml`.
 
 ## Browser storage
 
@@ -30,7 +30,7 @@ implement legacy protocol compatibility.
   response may also include a ready-to-share Worker registration link.
 - Client and MCP access use the same long-lived client token created through
   `POST /v1/tokens` with `type: client`. The Dashboard shows the connected
-  Master URL and a copyable Python Client configuration after creation.
+  Master URL and a copyable Client configuration after creation.
 - The Access page lists the user's client tokens without exposing plaintext,
   including status, creation time, last-use time, and the optional
   `last_used_ip` audit field. Active and disabled tokens can be enabled or
@@ -81,6 +81,6 @@ days and can be listed or revoked by administrators.
 ## Protocol ownership
 
 All Master access and response validation is implemented in
-`src/lib/master-client.ts`. The canonical wire contract lives in the sibling
-`capown-next/protocol/openapi.yaml`; Dashboard code never imports Master or
-Worker implementation modules.
+`src/lib/master-client.ts`. The canonical wire contract lives in the root
+`protocol/openapi.yaml`; Dashboard code never imports Master or Worker
+implementation modules.

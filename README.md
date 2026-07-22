@@ -12,6 +12,8 @@ The repository is split into independently deployable components:
 - **`worker/`** - TypeScript/Node Worker for Ed25519 authentication,
   heartbeats, claim-based task and cancellation delivery, and local MCP-over-
   stdio plugins.
+- **`dashboard/`** - Static Next.js browser Dashboard that connects directly to
+  the Master HTTP API and authenticated Dashboard event stream.
 - **`client/`** - Minimal standard-library Python REST client for task and
   plugin operations.
 - **`protocol/`** - Language-independent wire contract. The OpenAPI document
@@ -101,6 +103,20 @@ npm run build
 The Worker requires Node `>=20.18.0`. It can be installed from the repository
 root with `scripts/install-worker.sh` or `scripts/install-worker.ps1`.
 
+### Build and test the Dashboard
+
+```bash
+cd dashboard
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+The Dashboard requires Node `>=22`. It produces a static `out/` directory and
+can be served independently. Configure the Master
+`allowed_dashboard_origins` list with the exact Dashboard origin.
+
 ## Documentation
 
 - [Documentation index](docs/README.md)
@@ -111,14 +127,18 @@ root with `scripts/install-worker.sh` or `scripts/install-worker.ps1`.
 - [Protocol contract](protocol/README.md)
 - [Master README](master/README.md)
 - [Worker README](worker/README.md)
+- [Dashboard README](dashboard/README.md)
 - [Plugin protocol](protocol/plugin-protocol.md)
 
 ## Development checks
 
 ```bash
-cd master && go test ./... && go vet ./...
-cd worker && npm run typecheck && npm test
+(cd master && go test ./... && go vet ./...)
+(cd worker && npm run typecheck && npm test)
+(cd dashboard && npm run format && npm run lint && npm run typecheck && npm test && npm run build)
 npx --yes swagger-cli validate protocol/openapi.yaml
+node scripts/version.mjs sync-worker
+node scripts/version.mjs sync-dashboard
 node scripts/version.mjs check
 ```
 

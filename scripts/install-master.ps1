@@ -62,15 +62,15 @@ Write-Output ""
 
 Push-Location $MasterSrc
 try {
-    $ProductVersion = (& go run ./cmd/capown-version --manifest $VersionManifest --field product_version).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Unable to read product version" }
+    $MasterVersion = (& go run ./cmd/capown-version --manifest $VersionManifest --field master_version).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Unable to read Master version" }
     $ProtocolVersion = (& go run ./cmd/capown-version --manifest $VersionManifest --field protocol_version).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Unable to read protocol version" }
 } finally {
     Pop-Location
 }
 
-Write-Output "Product: $ProductVersion"
+Write-Output "Master:  $MasterVersion"
 Write-Output "Protocol: $ProtocolVersion"
 Write-Output ""
 
@@ -81,7 +81,7 @@ New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 Write-Output "Building Master..."
 Push-Location $MasterSrc
 try {
-    $ldflags = "-X github.com/capown/master/internal/version.ProductVersion=$ProductVersion -X github.com/capown/master/internal/version.ProtocolVersion=$ProtocolVersion"
+    $ldflags = "-X github.com/capown/master/internal/version.MasterVersion=$MasterVersion -X github.com/capown/master/internal/version.ProtocolVersion=$ProtocolVersion"
     & go build -ldflags $ldflags -o $BinaryFile ./cmd/capown-master
     if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 } finally {

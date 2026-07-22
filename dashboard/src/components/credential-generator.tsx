@@ -181,7 +181,7 @@ export function CredentialGenerator({
                     {copied === "worker-command" ? t("copied") : t("copy")}
                   </button>
                 </div>
-                <pre className="overflow-x-auto rounded-xl bg-slate-950 p-3 text-xs leading-6 whitespace-pre-wrap break-all text-slate-100">
+                <pre className="overflow-x-auto rounded-xl bg-slate-950 p-3 text-xs leading-6 break-all whitespace-pre-wrap text-slate-100">
                   {workerRegisterCommand}
                 </pre>
                 {masterIsLocal && (

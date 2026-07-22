@@ -1,67 +1,61 @@
 # CapOwn Dashboard
 
-Dashboard 现在是纯静态 SPA。浏览器直接访问用户指定的 CapOwn Master，
-Dashboard 本身不再提供 API 代理、SQLite、Cookie Session 或服务端审计。
-
-## 使用流程
-
-1. 打开 Dashboard，输入 Master 根地址。
-2. Dashboard 请求 `/v1/meta`。
-3. Master 尚未初始化时，创建首个管理员；否则直接登录。
-4. 登录后的 `cown_web_*` Token 只保存在当前浏览器标签页的
-   `sessionStorage` 中。
-5. Worker 列表和状态通过带 `Authorization` Header 的浏览器请求及 SSE
-   直接从 Master 获取。
-
-Dashboard 兼容 Python Master 与 Go Master，前提是两者遵守同一套 `/v1`
-协议。
+CapOwn Dashboard 是一个静态 Next.js SPA。浏览器通过带版本的 `/v1` API
+和经过认证的流式 SSE 事件直接连接 CapOwn Master。Dashboard 不提供后端、
+数据库、代理或服务端 Token 存储。
 
 ## 开发
 
+从主仓库根目录执行：
+
 ```bash
+cd dashboard
 npm ci
 npm run dev
 ```
 
-访问 `http://localhost:3000`，然后输入 Master 地址，例如
-`http://localhost:9230`。
+打开 `http://localhost:3000`，输入 Master 根地址，例如
+`http://localhost:9230`。Dashboard 需要 Node.js `>=22`。
 
-## 构建与部署
+## 检查和构建
 
 ```bash
+npm run format
+npm run lint
 npm run typecheck
 npm test
 npm run build
 ```
 
-构建产物位于 `out/`，可以直接交给 Nginx、Caddy 或对象存储静态网站。
-部署时需要将未知路径回退到 `index.html`。
+静态文件输出到 `out/`，可以部署到 Nginx、Caddy、对象存储静态网站，或
+使用仓库内置的静态 Docker 服务。
 
-也可以使用 Docker：
+## Docker
+
+从主仓库根目录执行：
 
 ```bash
-docker compose up --build -d
+docker compose -f dashboard/docker-compose.yml up --build -d
 ```
 
-默认端口是 `3000`，可通过 `CAPOWN_DASHBOARD_PORT` 修改。容器只提供
+默认主机端口是 `3000`，可以通过 `CAPOWN_DASHBOARD_PORT` 修改。容器只提供
 静态文件，不保存 Dashboard 数据。
 
 ## Master CORS
 
-浏览器直连要求 Master 允许 Dashboard 的 Origin。CapOwn-next Master 可
-使用：
+由于浏览器直接请求 Master，必须在 Master 中配置精确的 Dashboard Origin：
 
-```bash
-CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS=http://localhost:3000
+```toml
+[master]
+allowed_dashboard_origins = ["http://localhost:3000"]
 ```
 
-多个地址用逗号分隔。生产环境应使用 Dashboard 的真实 HTTPS Origin。
-Master 还需要允许 `Authorization`、`Content-Type` 和 `Last-Event-ID`。
+生产环境应填写真实的 HTTPS Origin，不要对公网 Master 使用通配配置。
 
-## 浏览器存储位置
+## 浏览器存储
 
-- `localStorage.capown_master_origin`：最近使用的 Master 地址
-- `sessionStorage.capown_web_token`：当前 Master Web Session Token
-- `sessionStorage.capown_web_session`：当前用户和过期时间
+- Master 地址只保存在 `localStorage` 的 `capown_master_origin` 中。
+- 当前 `cown_web_*` Session Token 只保存在 `sessionStorage` 中。
+- Dashboard 不记录或持久化凭据、Bearer Token、注册 Token 和插件密钥。
 
-退出登录会清理当前 Session。生产部署应使用 HTTPS。
+版本规则请参阅主仓库的 [`VERSIONING.md`](../VERSIONING.md)。

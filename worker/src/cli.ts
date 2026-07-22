@@ -28,7 +28,7 @@ import {
   type RuntimeControl,
   type WorkerProcessMode,
 } from "./service.js";
-import { PRODUCT_VERSION as VERSION } from "./generated/version.js";
+import { WORKER_VERSION as VERSION } from "./generated/version.js";
 
 export interface CliArgs {
   command: string;

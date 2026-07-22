@@ -160,7 +160,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 			},
 			"serverInfo": map[string]string{
 				"name":    mcpServerName,
-				"version": version.ProductVersion,
+				"version": version.MasterVersion,
 			},
 			"instructions": "CapOwn MCP server. Use plugin_call to invoke tools on owned Workers.",
 		}))
