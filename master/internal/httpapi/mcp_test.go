@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/capown/master/internal/config"
+	"github.com/capown/master/internal/domain"
 )
 
 func newMCPTestServer(t *testing.T, publicURL string) (*Server, string, string) {
@@ -91,6 +92,70 @@ func mcpTextResult(t *testing.T, body map[string]interface{}) string {
 		t.Fatalf("MCP content block has no text: %#v", block)
 	}
 	return text
+}
+
+func TestMCPPluginResultPreservesRichContent(t *testing.T) {
+	emptyText := ""
+	task := &domain.Task{
+		Result: &domain.PluginCallResult{
+			Content: []domain.ContentBlock{
+				{Type: "image", Data: "aW1hZ2U=", MIMEType: "image/png"},
+				{Type: "audio", Data: "YXVkaW8=", MIMEType: "audio/wav"},
+				{Type: "resource", Resource: &domain.ResourceContent{
+					URI: "file:///tmp/example.txt", MIMEType: "text/plain", Text: &emptyText,
+				}},
+			},
+		},
+	}
+
+	result := mcpPluginResult(task)
+	if len(result.Content) != 3 {
+		t.Fatalf("rich content count = %d, want 3", len(result.Content))
+	}
+	if result.Content[0].Type != "image" || result.Content[0].Data != "aW1hZ2U=" || result.Content[0].MimeType != "image/png" {
+		t.Fatalf("unexpected image content: %#v", result.Content[0])
+	}
+	if result.Content[1].Type != "audio" || result.Content[1].Data != "YXVkaW8=" || result.Content[1].MimeType != "audio/wav" {
+		t.Fatalf("unexpected audio content: %#v", result.Content[1])
+	}
+	resource := result.Content[2].Resource
+	if resource == nil || resource.URI != "file:///tmp/example.txt" || resource.MimeType != "text/plain" || resource.Text == nil || *resource.Text != "" {
+		t.Fatalf("unexpected resource content: %#v", resource)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"mimeType":"image/png"`)) || bytes.Contains(raw, []byte(`"mime_type"`)) {
+		t.Fatalf("MCP content has incorrect field names: %s", raw)
+	}
+}
+
+func TestValidPluginContentBlock(t *testing.T) {
+	text := "text"
+	blob := "blob"
+	tests := []struct {
+		name  string
+		block domain.ContentBlock
+		valid bool
+	}{
+		{name: "image", block: domain.ContentBlock{Type: "image", MIMEType: "image/png"}, valid: true},
+		{name: "audio", block: domain.ContentBlock{Type: "audio", MIMEType: "audio/wav"}, valid: true},
+		{name: "image without mime type", block: domain.ContentBlock{Type: "image"}},
+		{name: "resource text", block: domain.ContentBlock{Type: "resource", Resource: &domain.ResourceContent{URI: "file:///tmp/a.txt", Text: &text}}, valid: true},
+		{name: "resource blob", block: domain.ContentBlock{Type: "resource", Resource: &domain.ResourceContent{URI: "file:///tmp/a.bin", Blob: &blob}}, valid: true},
+		{name: "resource without content", block: domain.ContentBlock{Type: "resource", Resource: &domain.ResourceContent{URI: "file:///tmp/a.txt"}}},
+		{name: "resource with both content forms", block: domain.ContentBlock{Type: "resource", Resource: &domain.ResourceContent{URI: "file:///tmp/a.txt", Text: &text, Blob: &blob}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validPluginContentBlock(tt.block); got != tt.valid {
+				t.Fatalf("validPluginContentBlock() = %v, want %v", got, tt.valid)
+			}
+		})
+	}
 }
 
 func TestMCPInitializeAndToolsList(t *testing.T) {

@@ -71,7 +71,8 @@ docker compose up -d --build
 The default host port is `9230`. Master configuration and SQLite data are
 stored under `~/.capown/master` (or `%USERPROFILE%\.capown\master` on
 Windows). See [Getting Started](docs/getting-started.md) for first-user setup
-and Worker registration.
+and Worker registration. For mainland China deployments, the build source
+variables are documented in [Deployment](docs/deployment.md).
 
 ### Install the Master locally
 

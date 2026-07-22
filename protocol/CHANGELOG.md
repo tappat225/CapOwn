@@ -13,6 +13,12 @@ token management, Dashboard SSE, and the MCP Streamable HTTP endpoint.
 Master and Worker are updated together. No external compatibility guarantee is
 made before `1.0.0`.
 
+## 0.2.0 - 2026-07-22
+
+Plugin call results now support image, audio, and embedded resource content
+blocks. Worker-to-Master result fields use `snake_case`; the northbound MCP
+response uses MCP's `mimeType` spelling.
+
 ## 0.1.1 - 2026-07-21
 
 `POST /v1/workers` treats an Ed25519 `public_key` as the Worker's local

@@ -298,15 +298,19 @@ content model:
 }
 ```
 
-The first profile supports these content blocks:
+The profile supports these content blocks:
 
 ```json
 {"type": "text", "text": "..."}
 {"type": "json", "value": {}}
+{"type": "image", "data": "<base64>", "mime_type": "image/png"}
+{"type": "audio", "data": "<base64>", "mime_type": "audio/wav"}
+{"type": "resource", "resource": {"uri": "file:///tmp/example.txt", "mime_type": "text/plain", "text": "..."}}
 ```
 
-Binary, image, audio, resource-link, and embedded-resource blocks are
-reserved until size limits, storage, and client behavior are specified.
+Image and audio data are base64-encoded. Embedded resources contain a URI and
+exactly one of text or blob. Resource-link blocks remain reserved until their
+size limits, storage, and client behavior are specified.
 
 `structured_content` MAY contain a JSON object or array when the plugin
 returns structured output. The Worker MUST enforce `max_output_bytes` over the

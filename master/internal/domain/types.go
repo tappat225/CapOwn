@@ -276,9 +276,20 @@ func GenerateTaskID() string {
 
 // ContentBlock represents a plugin result content block.
 type ContentBlock struct {
-	Type  string      `json:"type"`
-	Text  string      `json:"text,omitempty"`
-	Value interface{} `json:"value,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Value    interface{}      `json:"value,omitempty"`
+	Data     string           `json:"data,omitempty"`
+	MIMEType string           `json:"mime_type,omitempty"`
+	Resource *ResourceContent `json:"resource,omitempty"`
+}
+
+// ResourceContent represents an embedded MCP resource content block.
+type ResourceContent struct {
+	URI      string  `json:"uri"`
+	MIMEType string  `json:"mime_type,omitempty"`
+	Text     *string `json:"text,omitempty"`
+	Blob     *string `json:"blob,omitempty"`
 }
 
 // PluginCallResult represents the result envelope for a plugin_call task.

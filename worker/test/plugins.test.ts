@@ -182,6 +182,61 @@ describe("plugin manifests", () => {
       await rm(configDir, { recursive: true, force: true });
     }
   });
+
+  it("normalizes image, audio, and embedded resource content", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "capown-rich-content-"));
+    const pluginsDir = join(configDir, "plugins.d");
+    await mkdir(pluginsDir);
+    const manifestPath = join(pluginsDir, "test.json");
+    const script = `
+      const readline = require("node:readline");
+      const rl = readline.createInterface({ input: process.stdin });
+      const send = (id, result) => process.stdout.write(JSON.stringify({jsonrpc:"2.0", id, result}) + "\\n");
+      rl.on("line", (line) => {
+        const req = JSON.parse(line);
+        if (req.id === undefined) return;
+        if (req.method === "initialize") {
+          send(req.id, {protocolVersion:"2025-03-26", capabilities:{}, serverInfo:{name:"rich",version:"1.0.0"}});
+        } else if (req.method === "tools/list") {
+          send(req.id, {tools:[{name:"rich",inputSchema:{type:"object"}}]});
+        } else if (req.method === "tools/call") {
+          send(req.id, {
+            content: [
+              {type:"image",data:"aW1hZ2U=",mimeType:"image/png"},
+              {type:"audio",data:"YXVkaW8=",mimeType:"audio/wav"},
+              {type:"resource",resource:{uri:"file:///tmp/example.txt",mimeType:"text/plain",text:""}}
+            ],
+            isError:false
+          });
+        }
+      });
+    `;
+    await writeFile(
+      manifestPath,
+      JSON.stringify(baseManifest([process.execPath, "-e", script]), null, 2),
+    );
+    try {
+      const manager = new PluginManager(configDir);
+      await manager.loadPlugins();
+      await manager.startPlugins();
+      const invocation = await manager.invokePlugin("test-plugin", "rich", {});
+      assert.deepEqual(invocation.content, [
+        { type: "image", data: "aW1hZ2U=", mime_type: "image/png" },
+        { type: "audio", data: "YXVkaW8=", mime_type: "audio/wav" },
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///tmp/example.txt",
+            mime_type: "text/plain",
+            text: "",
+          },
+        },
+      ]);
+      await manager.stopPlugins();
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("MCP stdio cancellation", () => {

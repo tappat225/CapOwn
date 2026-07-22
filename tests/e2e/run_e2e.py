@@ -232,10 +232,10 @@ def main() -> int:
         deadline = time.time() + 20
         while time.time() < deadline:
             try:
-                workers = client.list_workers()
+                workers = client.workers_list()
                 for w in workers:
                     if w["worker_id"] == worker_id and w["status"] == "online":
-                        plugins = client.get_worker_plugins(worker_id)
+                        plugins = client.plugin_list(worker_id)
                         worker_online = bool(plugins)
                         break
                 if worker_online:
@@ -306,14 +306,14 @@ def main() -> int:
 
         # 13. Test asynchronous timeout
         print("[e2e] Step 13: Testing plugin timeout...")
-        timeout_task = client.dispatch_task(
+        timeout_task = client._dispatch_task(
             worker_id, "plugin_call",
             {"plugin_id": "fake-test", "tool_name": "sleep", "arguments": {"seconds": 2}},
             timeout_seconds=1,
         )
         deadline = time.time() + 5
         while time.time() < deadline:
-            timeout_task = client.get_task(timeout_task["task_id"])
+            timeout_task = client.task_get(timeout_task["task_id"])
             if timeout_task.get("status") in {"timeout", "failed", "completed"}:
                 break
             time.sleep(0.1)
@@ -324,24 +324,24 @@ def main() -> int:
 
         # 14. Test cancellation remains terminal after the plugin finishes
         print("[e2e] Step 14: Testing task cancellation...")
-        cancel_task = client.dispatch_task(
+        cancel_task = client._dispatch_task(
             worker_id, "plugin_call",
             {"plugin_id": "fake-test", "tool_name": "sleep", "arguments": {"seconds": 2}},
             timeout_seconds=5,
         )
-        canceled = client.cancel_task(cancel_task["task_id"])
+        canceled = client.task_cancel(cancel_task["task_id"])
         if canceled.get("status") not in {"running", "canceled"}:
             print(f"[e2e] FAIL: Unexpected cancel response {canceled.get('status')}")
             return 1
         deadline = time.time() + 5
         while time.time() < deadline and canceled.get("status") == "running":
             time.sleep(0.1)
-            canceled = client.get_task(cancel_task["task_id"])
+            canceled = client.task_get(cancel_task["task_id"])
         if canceled.get("status") != "canceled":
             print(f"[e2e] FAIL: Expected canceled, got {canceled.get('status')}")
             return 1
         time.sleep(2.5)
-        canceled = client.get_task(cancel_task["task_id"])
+        canceled = client.task_get(cancel_task["task_id"])
         if canceled.get("status") != "canceled":
             print(f"[e2e] FAIL: Canceled task was overwritten with {canceled.get('status')}")
             return 1

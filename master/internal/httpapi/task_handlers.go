@@ -59,6 +59,22 @@ type taskResponse struct {
 	Truncated     bool              `json:"truncated"`
 }
 
+func validPluginContentBlock(block domain.ContentBlock) bool {
+	switch block.Type {
+	case "text", "json":
+		return true
+	case "image", "audio":
+		return block.MIMEType != ""
+	case "resource":
+		if block.Resource == nil || block.Resource.URI == "" {
+			return false
+		}
+		return (block.Resource.Text == nil) != (block.Resource.Blob == nil)
+	default:
+		return false
+	}
+}
+
 func decodeStrictRaw(raw json.RawMessage, dst interface{}) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -543,7 +559,7 @@ func (s *Server) handleReportTaskResult(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		for _, block := range pluginResult.Content {
-			if block.Type != "text" && block.Type != "json" {
+			if !validPluginContentBlock(block) {
 				writeErrorCode(w, http.StatusBadRequest, domain.ErrInvalidInput, "invalid result content block")
 				return
 			}

@@ -191,6 +191,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/events", s.handleDashboardEvents)
 
 	// Admin routes
+	s.mux.HandleFunc("GET /v1/admin/workers", s.handleAdminListWorkers)
 	s.mux.HandleFunc("GET /v1/admin/users", s.handleAdminListUsers)
 	s.mux.HandleFunc("POST /v1/admin/users", s.handleAdminCreateUser)
 	s.mux.HandleFunc("GET /v1/admin/users/{username}", s.handleAdminGetUser)

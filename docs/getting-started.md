@@ -38,6 +38,10 @@ SQLite database live under `~/.capown/master`; on Windows the default is
 `%USERPROFILE%\.capown\master`. Set `CAPOWN_MASTER_DIR` when Docker cannot
 resolve the intended home directory.
 
+When the default registries are not reachable, provide alternate build sources
+through `GO_IMAGE`, `ALPINE_IMAGE`, `ALPINE_MIRROR`, and `GOPROXY` before the
+same Compose command. See [Deployment](deployment.md) for an example.
+
 Check the process:
 
 ```bash
@@ -141,7 +145,26 @@ initialization, tools, Origin handling, and examples.
 
 ## 7. Use the REST client
 
-The repository also includes a small standard-library client:
+The repository also includes a small standard-library client. It reads the
+default config at `~/.capown/client/config.toml` (or the path passed with
+`--config`):
+
+```toml
+role = "client"
+master_url = "http://localhost:9230"
+client_token = "<client-token>"
+
+[client]
+soft_timeout = 30
+```
+
+List Workers from the command line:
+
+```bash
+python client/capown_client.py workers-list
+```
+
+The library API remains available for Python callers:
 
 ```python
 from client.capown_client import CapownClient, ClientConfig
@@ -150,12 +173,12 @@ client = CapownClient(ClientConfig(
     master_url="http://localhost:9230",
     client_token="<client-token>",
 ))
-print(client.list_workers())
+print(client.workers_list())
 ```
 
 Its methods target the same `/v1` contract. It is not a replacement protocol
-and currently focuses on Worker listing, task dispatch, task status,
-cancellation, and plugin calls.
+and exposes MCP-aligned methods such as `workers_list`, `worker_get`,
+`plugin_list`, `plugin_call`, `task_get`, `task_wait`, and `task_cancel`.
 
 ## Troubleshooting
 
