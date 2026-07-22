@@ -98,19 +98,30 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var workers []*store.WorkerRow
-	var err error
-
-	if ctx.hasAdminScope() {
-		workers, err = s.store.ListAllWorkers()
-	} else {
-		workers, err = s.store.ListWorkersByOwner(ctx.UserID)
-	}
+	workers, err := s.store.ListWorkersByOwner(ctx.UserID)
 	if err != nil {
 		writeError(w, domain.ErrInternalResponse)
 		return
 	}
+	s.writeWorkerList(w, workers)
+}
 
+func (s *Server) handleAdminListWorkers(w http.ResponseWriter, r *http.Request) {
+	_, apiErr := s.resolveAdminToken(r)
+	if apiErr != nil {
+		writeError(w, apiErr)
+		return
+	}
+
+	workers, err := s.store.ListAllWorkers()
+	if err != nil {
+		writeError(w, domain.ErrInternalResponse)
+		return
+	}
+	s.writeWorkerList(w, workers)
+}
+
+func (s *Server) writeWorkerList(w http.ResponseWriter, workers []*store.WorkerRow) {
 	items := make([]workerListItem, 0, len(workers))
 	users, err := s.store.ListUsers()
 	if err != nil {

@@ -198,6 +198,7 @@ GET /v1/events   -- SSE stream (requires cown_web_* session)
 
 ### Admin APIs
 ```
+GET    /v1/admin/workers                                     -- list all workers
 GET    /v1/admin/users                                     -- list users
 POST   /v1/admin/users                                     -- create user
 GET    /v1/admin/users/{username}                           -- get user
