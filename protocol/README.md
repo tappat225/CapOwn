@@ -37,6 +37,7 @@ The current `/v1` contract covers:
 - Worker Ed25519 challenge-response authentication;
 - Worker runtime metadata and liveness;
 - Worker runtime heartbeats and dashboard SSE events;
+- cross-owner administrative Worker listing;
 - Worker job claiming with `POST /v1/workers/{worker_id}/jobs/claim`;
 - plugin discovery, task dispatch, task results, and task cancellation;
 - `plugin_call` execution through MCP-over-stdio plugins; and
@@ -61,9 +62,9 @@ Workers claim jobs with `POST /v1/workers/{worker_id}/jobs/claim`:
    stage. It is a route namespace, not a promise that the SemVer major version
    is stable. Breaking changes update the current contract in place; do not add
    `/v2`, compatibility shims, or parallel protocol implementations.
-  2. `info.version` uses SemVer for the protocol contract. The current `0.2.0`
-     version adds image, audio, and embedded resource plugin result blocks after
-     the `0.1.1` baseline. Before
+  2. `info.version` uses SemVer for the protocol contract. The current `0.3.0`
+     version documents the cross-owner administrator Worker list after the
+     `0.2.0` plugin result content-block addition. Before
      `1.0.0`, protocol changes may be breaking; use patch releases for
      documentation or compatible fixes and minor releases for contract changes.
 3. Product and protocol versions are related but independent. A product

@@ -2,16 +2,14 @@
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-## 0.1.0 - 2026-07-19
+## 0.3.0 - 2026-07-23
 
-First pre-user baseline of the CapOwn control-plane protocol.
+Compatible administrative API addition:
 
-This release includes authentication, Worker registration and heartbeats,
-claim-based task delivery, task cancellation, plugin discovery and invocation,
-token management, Dashboard SSE, and the MCP Streamable HTTP endpoint.
-
-Master and Worker are updated together. No external compatibility guarantee is
-made before `1.0.0`.
+- Document `GET /v1/admin/workers`, which returns all non-revoked Workers
+  across owners to an administrator Web Session or admin Token.
+- Keep `GET /v1/workers` owner-scoped for every caller, including
+  administrators using the normal Worker-list endpoint.
 
 ## 0.2.0 - 2026-07-22
 
@@ -45,6 +43,17 @@ semantics.
 - Add deploy-time registry copy: installer scripts and Docker entrypoint copy
   `registry/registry.json` to Master data directory.
 - Default registry path: `~/.capown/master/registry/registry.json`.
+
+## 0.1.0 - 2026-07-19
+
+First pre-user baseline of the CapOwn control-plane protocol.
+
+This release includes authentication, Worker registration and heartbeats,
+claim-based task delivery, task cancellation, plugin discovery and invocation,
+token management, Dashboard SSE, and the MCP Streamable HTTP endpoint.
+
+Master and Worker are updated together. No external compatibility guarantee is
+made before `1.0.0`.
 
 ## Pre-0.1.0 development history
 

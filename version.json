@@ -1,5 +1,5 @@
 {
-  "protocol_version": "0.2.0",
+  "protocol_version": "0.3.0",
   "components": {
     "master": {
       "version": "0.1.0"

@@ -1,31 +1,30 @@
-# MCP Support
+# MCP 接入
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-The Master exposes a stateless MCP Streamable HTTP endpoint at `/mcp`. It is
-the northbound interface for MCP hosts such as Codex and other agent clients.
-It uses the same task and plugin model as the REST API.
+Master 在 `/mcp` 提供无状态的 MCP Streamable HTTP 接口，供 Codex 等 MCP Host 使用。
+它与 REST 共用 Client Token、Worker 所有权、任务路由和结果关联，不会建立第二条 Worker
+投递通道。
 
-## Endpoint and authentication
-
-Send JSON-RPC requests with:
+## 连接参数
 
 ```text
 POST https://master.example.com/mcp
+Authorization: Bearer <client-token>
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Authorization: Bearer <client-token>
 ```
 
-Only a `client` bearer token is accepted. Web sessions, admin tokens, Worker
-sessions, and Worker registration tokens are rejected. Authentication applies
-to `initialize`, `ping`, and `tools/list` as well as tool calls.
+只有 `client` 类型的 Bearer Token 可用。Web Session、管理员 Token、Worker Session 和
+Worker 注册令牌都会被拒绝。端点无 MCP Session 状态，`GET /mcp` 不受支持；包括
+`initialize`、`ping` 和 `tools/list` 在内的每个请求都必须携带 Token。
 
-The endpoint is stateless and does not create an MCP session. `GET /mcp` is not
-supported. Requests with an `Origin` header are checked against the configured
-Master public URL; non-browser clients normally omit `Origin`.
+当请求带有 `Origin` 时，Master 会按 `public_url` 检查它；非浏览器 MCP Host 通常不发送
+`Origin`。公网部署请使用 HTTPS，并设置正确的 `public_url`。
 
-## Initialization
+## 初始化
+
+服务器支持 MCP 协议版本 `2025-03-26`：
 
 ```json
 {
@@ -40,27 +39,25 @@ Master public URL; non-browser clients normally omit `Origin`.
 }
 ```
 
-After `initialize`, clients may send the `notifications/initialized`
-notification. Notifications are accepted with HTTP `202` and no response
-body. The current server returns JSON responses for requests with an ID.
+随后可发送 `notifications/initialized`；通知返回 `202` 且无响应体。
 
-## Tools
+## 工具
 
-| Tool | Purpose |
+| 工具 | 用途 |
 | --- | --- |
-| `workers_list` | List Workers visible to the authenticated client. |
-| `worker_get` | Get one Worker by ID or owned name. |
-| `plugin_list` | Read a Worker's reported plugin snapshot. |
-| `plugin_call` | Invoke a tool exposed by a healthy Worker plugin. |
-| `task_get` | Read task status and result. |
-| `task_wait` | Wait for a task for a bounded period. |
-| `task_cancel` | Request cancellation of a pending or running task. |
+| `workers_list` | 列出当前 Client Token 可见的 Worker |
+| `worker_get` | 按 Worker ID 或所属名称查看节点 |
+| `plugin_list` | 获取目标 Worker 最近上报的插件快照 |
+| `plugin_call` | 调用在线 Worker 的一个本地插件工具 |
+| `task_get` | 查询任务状态和结果 |
+| `task_wait` | 在受限时长内等待任务状态变化 |
+| `task_cancel` | 请求取消待处理或运行中的任务 |
 
-Worker arguments accept the exact `worker_id` or the owned `worker_name`.
-Concrete plugin and tool metadata comes from the Worker heartbeat. The Master
-does not start a plugin process in the MCP handler.
+`plugin_call` 的 `worker` 参数可传精确的 `worker_id` 或当前用户所属的
+`worker_name`。插件名、工具名和参数应先由 `plugin_list` 获取，不要假定所有 Worker 都有
+相同工具。
 
-Example plugin call:
+## 调用示例
 
 ```json
 {
@@ -73,19 +70,18 @@ Example plugin call:
       "worker": "build-host",
       "plugin_id": "filesystem",
       "tool_name": "read_file",
-      "arguments": {"path": "/home/user/project/README.md"},
+      "arguments": {"path": "/workspace/README.md"},
       "timeout_seconds": 60
     }
   }
 }
 ```
 
-`plugin_call` creates a `plugin_call` task through `/v1/tasks`, sends it to
-the target Worker through the claim endpoint, and correlates the result. If a
-bounded wait expires, the response includes the task ID and current status so
-the client can use `task_get` or `task_wait`.
+这个请求只会创建 `plugin_call` 任务。Master 入队后等待 Worker claim；Worker 再启动其
+本地插件进程完成调用。MCP Handler 不会直接运行插件。若等待窗口结束仍未完成，响应会带回
+任务 ID 和当前状态，后续使用 `task_get` 或 `task_wait` 查询。
 
-## Diagnostics with curl
+## curl 诊断
 
 ```bash
 curl -fsS https://master.example.com/mcp \
@@ -95,43 +91,6 @@ curl -fsS https://master.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-The response follows the JSON-RPC shape. Tool failures are returned as MCP
-errors and preserve CapOwn's machine-readable task and plugin error codes.
-
-## Worker plugins
-
-Plugins are local Worker configuration, not remotely installable code. A
-manifest in `~/.capown/worker/plugins.d/` selects an MCP-over-stdio command:
-
-```json
-{
-  "schema_version": 1,
-  "plugin_id": "example",
-  "version": "1.0.0",
-  "kind": "mcp",
-  "transport": "stdio",
-  "enabled": true,
-  "command": ["node", "./plugins/example.js"],
-  "permissions": {
-    "network": "none",
-    "read_roots": [],
-    "write_roots": []
-  }
-}
-```
-
-Commands are argv arrays and are never shell-interpolated. The Worker
-sanitizes plugin metadata before reporting it and keeps its own credentials
-out of plugin environment inheritance. The permission fields describe the
-intended boundary; the plugin process is still trusted local code and the
-Worker does not provide a general operating-system sandbox.
-
-See [Plugin Protocol](../protocol/plugin-protocol.md) for the complete
-manifest, lifecycle, result, and cancellation rules.
-
-## REST relationship
-
-MCP and REST share client-token authentication, ownership checks, task routing,
-Worker claims, and result correlation. The REST contract is canonical in
-[`protocol/openapi.yaml`](../protocol/openapi.yaml); MCP does not introduce a
-second Worker delivery path.
+MCP 错误采用 JSON-RPC 形状，并保留 CapOwn 可机器读取的任务和插件错误码。REST 端点、
+完整输入输出和错误码以
+[OpenAPI 合约](https://github.com/tappat225/capown/blob/master/protocol/openapi.yaml)为准。
