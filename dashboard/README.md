@@ -1,13 +1,24 @@
 # CapOwn Dashboard
 
-CapOwn Dashboard is a static Next.js SPA. The browser connects directly to a
-CapOwn Master through the versioned `/v1` API and authenticated streaming-fetch
-SSE events. The Dashboard has no backend, database, proxy, or server-side token
-store.
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
-## Development
+CapOwn Dashboard 是独立部署的 Next.js 静态 SPA。浏览器直接访问 Master 的 `/v1`
+API，并通过带 `Authorization` 的流式 fetch 消费 Dashboard SSE。它没有后端、数据库、
+请求代理或服务器端 Token 存储。
 
-Run these commands from the repository root:
+## 当前页面
+
+- 概览：Worker、插件健康度和管理事件；
+- Workers：查看节点、心跳、插件快照，重命名或撤销节点；
+- 插件：聚合插件状态并启用/禁用在线 Worker 的插件；
+- 插件市场：读取 Master registry，并向在线 Worker 下发安装或重装任务；
+- 访问凭据：创建和管理 Worker 注册凭据与 Client/MCP Token；
+- 管理员：账户和一次性邀请管理。
+
+完整产品说明见 [`../docs/product-guide.md`](../docs/product-guide.md)，生产部署见
+[`../docs/deployment.md`](../docs/deployment.md)。
+
+## 开发
 
 ```bash
 cd dashboard
@@ -15,10 +26,10 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000` and enter the Master origin, such as
-`http://localhost:9230`. The Dashboard requires Node.js `>=22`.
+打开 `http://localhost:3000`，输入 Master 根地址，例如
+`http://localhost:9230`。Dashboard 需要 Node.js `>=22`。
 
-## Checks and static build
+## 检查与构建
 
 ```bash
 npm run format
@@ -28,47 +39,29 @@ npm test
 npm run build
 ```
 
-The static output is written to `out/`. It can be served by Nginx, Caddy, an
-object-storage website, or the included static Docker server.
-
-## Docker
-
-Run from the repository root:
+静态文件输出到 `out/`。也可使用仓库内置容器：
 
 ```bash
 docker compose -f dashboard/docker-compose.yml up --build -d
 ```
 
-The default host port is `3000`; set `CAPOWN_DASHBOARD_PORT` to change it. The
-container serves static files only and does not persist Dashboard data.
+默认主机端口是 `3000`，可通过 `CAPOWN_DASHBOARD_PORT` 修改。
 
 ## Master CORS
 
-Because the browser calls Master directly, configure the Master with the exact
-Dashboard origin:
+浏览器直接请求 Master，因此需要配置精确 Dashboard Origin：
 
 ```toml
 [master]
-allowed_dashboard_origins = ["http://localhost:3000"]
+allowed_dashboard_origins = ["https://dashboard.example.com"]
 ```
 
-For a public deployment, use the real HTTPS origin. Do not use a wildcard
-allowlist for a public Master.
+本机可使用 `http://localhost:3000`。公网环境不要保留无限制的空列表。
 
-## Browser storage
+## 浏览器存储
 
-- The Master origin is stored in `localStorage` under
-  `capown_master_origin`.
-- The current `cown_web_*` session token is stored only in `sessionStorage`.
-- Credentials, bearer tokens, registration tokens, and plugin secrets are not
-  logged or persisted by the Dashboard.
+- Master Origin 保存在 `localStorage` 的 `capown_master_origin`；
+- 当前 `cown_web_*` Session 只保存在 `sessionStorage`；
+- Client Token、注册链接、邀请码和插件秘密不会由 Dashboard 持久化。
 
-## Layout
-
-```text
-src/app/                 Static pages and login flow
-src/components/          Dashboard, navigation, and Worker UI
-src/lib/master-client.ts Browser Master client, validation, storage, and SSE
-next.config.ts           Static export configuration
-out/                     Generated build output (ignored)
-```
+版本规则见根目录 [`VERSIONING.md`](../VERSIONING.md)。

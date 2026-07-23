@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+
+site_name: CapOwn 文档
+site_description: CapOwn 自托管 AI Agent 远程执行控制平面文档
+site_author: CapOwn contributors
+site_url: https://docs.capown.net/
+repo_url: https://github.com/tappat225/capown
+repo_name: tappat225/capown
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色模式
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - 首页: index.md
+  - 快速开始: getting-started.md
+  - 使用指南:
+      - 产品使用: product-guide.md
+      - 插件与插件市场: plugins.md
+      - MCP 接入: mcp.md
+  - 架构与部署:
+      - 系统架构: architecture.md
+      - 生产部署: deployment.md
+      - 配置参考: configuration.md
+      - 故障排查: troubleshooting.md
+  - 开发与协议: development.md

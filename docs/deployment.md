@@ -1,27 +1,30 @@
-# Deployment
+# 生产部署
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-CapOwn has one central Master and one or more outbound-connected Workers.
-Docker is the supported packaging path for the Master. The Worker is a
-Node.js application installed on each execution host.
+CapOwn 的常见拓扑是一台中心 Master、独立静态 Dashboard，以及若干仅出站连接的 Worker。
+Master 建议使用 Docker Compose；Worker 部署在实际拥有本地资源的机器上。
 
-## Master with Docker Compose
+## Master
+
+### Docker Compose
 
 ```bash
 cd master
 docker compose up -d --build
+docker compose logs -f master
 ```
 
-Compose maps the host port `${MASTER_PORT:-9230}` to the container's fixed
-port `9230` and mounts `${CAPOWN_MASTER_DIR:-$HOME/.capown/master}` at
-`/data`. Configuration is created at `/data/config.toml`; the database is at
-`/data/data/master.db`.
+Compose 将 `${MASTER_PORT:-9230}` 映射到容器固定的 `9230` 端口，并把
+`${CAPOWN_MASTER_DIR:-$HOME/.capown/master}` 挂载到 `/data`。其中：
 
-Build source overrides are available for networks that cannot reliably reach
-the default public registries. Set `GO_IMAGE` and `ALPINE_IMAGE` to complete
-image references, `ALPINE_MIRROR` to an Alpine repository base without a
-scheme, and `GOPROXY` to a Go module proxy:
+| 容器路径 | 内容 |
+| --- | --- |
+| `/data/config.toml` | 持久化 Master 配置 |
+| `/data/data/master.db` | SQLite 数据库 |
+| `/data/registry/registry.json` | Master 加载的插件目录 |
+
+在中国大陆或受限网络，可替换**构建期**镜像和包源：
 
 ```bash
 GO_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/golang:1.23-alpine \
@@ -31,40 +34,36 @@ GOPROXY=https://goproxy.cn,direct \
 docker compose up -d --build
 ```
 
-All four variables are build-time settings. The defaults preserve the current
-official Go image, Alpine image, Alpine repository, and Go module proxy.
-
-Useful operations:
+这些变量不会传给运行中的 Master。常用操作：
 
 ```bash
-docker compose logs -f master
 docker compose restart
 docker compose stop
 docker compose start
 docker compose down
 ```
 
-For a public or reverse-proxied deployment, set
-`CAPOWN_MASTER_PUBLIC_URL` to the URL that Workers and clients use. This
-allows the Master to return complete Worker registration links and is also
-used when validating browser `Origin` headers for MCP.
+### 本地安装
 
-The persistent `[master].allowed_dashboard_origins` list controls browser
-access. An empty list is unrestricted for local self-hosted use. For a public
-deployment, set exact trusted origins and restart the service:
+安装脚本会构建二进制、创建启动器和数据目录，但不会创建系统服务：
 
-```toml
-[master]
-allowed_dashboard_origins = ["https://dashboard.example.com"]
+```bash
+bash scripts/install-master.sh
+~/.capown/bin/capown-master
 ```
 
-`CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS` is an optional comma-separated
-environment override for automation and temporary deployments.
+Windows：
 
-## Dashboard deployment
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-master.ps1
+& "$HOME\.capown\bin\capown-master.cmd"
+```
 
-The Dashboard is a static SPA and remains independently deployable from the
-Master. From the repository root:
+两种脚本都支持 `--prefix <directory>`，适合隔离测试环境。
+
+## Dashboard
+
+Dashboard 是静态文件，必须与 Master 独立部署：
 
 ```bash
 cd dashboard
@@ -72,84 +71,46 @@ npm ci
 npm run build
 ```
 
-Serve `dashboard/out/` with Nginx, Caddy, or another static file server. The
-included container can be built with:
+将 `dashboard/out/` 部署到 Nginx、Caddy、对象存储静态站点，或使用自带容器：
 
 ```bash
-docker compose -f dashboard/docker-compose.yml up --build -d
+docker compose -f dashboard/docker-compose.yml up -d --build
 ```
 
-The browser calls the Master directly, so configure the exact public Dashboard
-origin in `allowed_dashboard_origins`. The Dashboard build context is
-`dashboard/`; do not use the repository root as the context for
-`dashboard/Dockerfile` unless the Dockerfile is changed accordingly.
+默认端口是 `3000`，可通过 `CAPOWN_DASHBOARD_PORT` 修改。浏览器直接请求 Master，
+所以生产环境必须在 Master 配置精确的 Dashboard Origin：
 
-## Local Master installation
-
-The installer builds the Go binary and creates a launcher. It does not create
-a system service:
-
-```bash
-bash scripts/install-master.sh
-~/.capown/bin/capown-master
+```toml
+[master]
+public_url = "https://master.example.com"
+allowed_dashboard_origins = ["https://dashboard.example.com"]
 ```
 
-On Windows:
+空数组在当前实现中表示不限制浏览器来源，只应在本机或可信私网使用。若通过环境变量临时
+覆盖，使用逗号分隔的 `CAPOWN_MASTER_ALLOWED_DASHBOARD_ORIGINS`。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-master.ps1
-& "$HOME\.capown\bin\capown-master.cmd"
-```
+## 反向代理和 TLS
 
-Use `--prefix <directory>` with either installer to place the installation
-under an isolated test home. Master configuration and data remain outside the
-repository by default.
+推荐在 Master 前终止 TLS，对外提供一个稳定 HTTPS Origin。Worker、MCP Host 和 Dashboard
+都应使用此地址；同时设置 `CAPOWN_MASTER_PUBLIC_URL`，以便生成可用注册链接并校验 MCP
+浏览器 Origin。
 
-## Worker installation
-
-The Worker requires Node.js `>=20.18.0` and npm. From a local checkout:
-
-```bash
-bash scripts/install-worker.sh
-capown-worker register https://master.example.com/v1/worker-registrations/<token>
-capown-worker start
-```
-
-On Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-worker.ps1
-& "$HOME\.capown\bin\capown-worker.cmd" register `
-  https://master.example.com/v1/worker-registrations/<token>
-& "$HOME\.capown\bin\capown-worker.cmd" start
-```
-
-The installer builds an application copy under `~/.capown/worker/app` and
-keeps mutable configuration under `~/.capown/worker`. It does not create a
-system service or automatically register a Worker.
-
-For a foreground development run:
-
-```bash
-cd worker
-npm ci
-npm run build
-node dist/src/cli.js start --foreground
-```
-
-## Reverse proxy
-
-Expose the Master origin through TLS and forward both `/v1/` and `/mcp` to
-the same upstream. Workers use ordinary HTTP requests for registration,
-authentication, heartbeats, claims, and results, so no Worker-specific inbound
-listener or SSE proxy is required.
-
-Minimal Nginx shape:
+Nginx 示例：
 
 ```nginx
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
     server_name master.example.com;
+
+    location /v1/events {
+        proxy_pass http://127.0.0.1:9230;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 90s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:9230;
@@ -157,33 +118,43 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 90s;
     }
 }
 ```
 
-Set `CAPOWN_MASTER_PUBLIC_URL=https://master.example.com` and configure the
-Dashboard origin allowlist when a browser Dashboard is hosted separately.
-Do not copy the old classic proxy rules that route Worker task delivery over
-SSE; current Workers use the authenticated claim endpoint.
+`/v1/events` 是 Dashboard SSE，需关闭代理缓冲。Worker 不使用 SSE：注册、认证、心跳、
+claim、结果和取消都走普通的认证 HTTP 请求；不要从 classic 文档复制 Worker SSE 代理规则。
 
-## Persistent paths
+## Worker
 
-| Data | Default path |
-| --- | --- |
-| Master config | `~/.capown/master/config.toml` |
-| Master database | `~/.capown/master/data/master.db` |
-| Worker config | `~/.capown/worker/config.toml` |
-| Worker identity | `~/.capown/worker/identity.toml` |
-| Worker plugins | `~/.capown/worker/plugins.d/` |
-| Worker logs | `~/.capown/worker/worker.log` |
-| Master registry | `~/.capown/master/registry/registry.json` |
+```bash
+bash scripts/install-worker.sh
+capown-worker register https://master.example.com/v1/worker-registrations/<token>
+capown-worker start
+```
 
-Keep config, database, identity, registration links, and bearer tokens out of
-source control and logs. Registration tokens are returned in plaintext only
-when created; client tokens are returned in plaintext only at token creation.
+Worker 安装目录和可变状态分离。需要持续运行或开机自启时，请由部署环境的 systemd、
+Windows Task Scheduler、supervisor 或容器编排托管 `capown-worker start --foreground`；
+CapOwn 安装器不会替你创建该服务。进程的最低权限账户应只拥有预期工作目录和插件目录的
+访问权。
 
-## Operational checks
+### Worker 进程托管 {#worker-process-management}
+
+systemd 单元的核心命令示例：
+
+```ini
+[Service]
+User=capown
+ExecStart=/home/capown/.capown/bin/capown-worker start --foreground
+Restart=always
+RestartSec=5
+```
+
+实际单元还应配置网络就绪依赖、日志策略、工作目录和环境变量。先在同一用户下手工执行
+`capown-worker status` 与 `capown-worker start --foreground` 验证配置。
+
+## 验收检查
 
 ```bash
 curl -fsS https://master.example.com/healthz
@@ -192,6 +163,6 @@ capown-worker status
 capown-worker logs --no-follow
 ```
 
-When a Worker is stale, inspect its last runtime heartbeat and confirm that it
-can reach the Master origin. A task is delivered only after the Worker claims
-it; Dashboard event delivery does not affect Worker task delivery.
+然后使用 Dashboard 检查 Worker 在线和插件快照，再用 Client Token 执行一次 MCP
+`tools/list`。部署完成后继续阅读[配置参考](configuration.md)和
+[故障排查](troubleshooting.md)。

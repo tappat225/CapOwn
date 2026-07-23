@@ -1,153 +1,133 @@
-# Getting Started
+# 快速开始
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-This guide runs the current Master and Worker, then connects an MCP client.
-The protocol is still pre-user-development `v1`; use
-[`protocol/openapi.yaml`](../protocol/openapi.yaml) for exact request and
-response shapes.
+本页在一台管理机器上启动 Master 和 Dashboard，在另一台或同一台机器上注册 Worker，
+最后通过 MCP 调用 Worker 的本地插件。演示使用本地 HTTP；面向公网时应先阅读
+[生产部署](deployment.md)并启用 HTTPS。
 
-## Prerequisites
+## 前提条件
 
-- Go 1.23 or newer for the Master.
-- Node.js 20.18 or newer and npm for the Worker.
-- Docker and Docker Compose for the recommended Master deployment.
-- A client token for REST or MCP access.
+| 组件 | 要求 |
+| --- | --- |
+| Master | Docker Engine 与 Docker Compose V2；或 Go `>=1.23` |
+| Dashboard | Docker；或 Node.js `>=22` |
+| Worker | Node.js `>=20.18.0` 与 npm |
+| MCP Host | 支持 Streamable HTTP 与 Bearer Token 的 MCP 客户端 |
 
-The Worker does not require an inbound port. The Master must be reachable by
-both the Worker and the client.
+Master 必须能被 Dashboard、Worker 和 MCP Host 访问。Worker 不需要也不应开放入站端口。
 
-## 1. Start the Master
+## 1. 启动 Master
 
-From the repository root:
+从仓库根目录执行：
 
 ```bash
 cd master
 docker compose up -d --build
+docker compose logs -f master
 ```
 
-The default host port is `9230`. To use another host port, change only the
-mapping:
+默认端口是 `9230`。只修改主机映射时：
 
 ```bash
 MASTER_PORT=9320 docker compose up -d --build
 ```
 
-The container still listens on port `9230`. Persistent configuration and the
-SQLite database live under `~/.capown/master`; on Windows the default is
-`%USERPROFILE%\.capown\master`. Set `CAPOWN_MASTER_DIR` when Docker cannot
-resolve the intended home directory.
-
-When the default registries are not reachable, provide alternate build sources
-through `GO_IMAGE`, `ALPINE_IMAGE`, `ALPINE_MIRROR`, and `GOPROXY` before the
-same Compose command. See [Deployment](deployment.md) for an example.
-
-Check the process:
+健康检查：
 
 ```bash
 curl http://localhost:9230/healthz
 curl http://localhost:9230/v1/health
 ```
 
-For a local non-Docker install, run `bash scripts/install-master.sh` from the
-repository root. The Windows equivalent is
-`scripts/install-master.ps1`.
+Compose 将主机的 `~/.capown/master`（Windows 为
+`%USERPROFILE%\.capown\master`）挂载到容器 `/data`。首次运行会创建
+`config.toml` 和 SQLite 数据库目录。
 
-## 2. Create the first user
-
-The first user becomes an administrator and does not need an invitation:
+## 2. 启动并连接 Dashboard
 
 ```bash
-curl -X POST http://localhost:9230/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"replace-this-password"}'
+docker compose -f dashboard/docker-compose.yml up -d --build
 ```
 
-Use the returned web session with the web management endpoints or Dashboard.
-After initialization, normal user registration requires an administrator
-invitation.
+浏览器打开 `http://localhost:3000`，输入 Master 根地址，例如
+`http://localhost:9230`。请填写**源地址**，不要包含 `/v1` 或 `/mcp`。
 
-## 3. Create a Worker registration link
+首次注册不需要邀请码，创建的第一个用户自动成为管理员。后续用户必须使用管理员创建的
+一次性邀请码。登录后在“访问凭据”页面完成下面两项操作：
 
-Create a registration token through the authenticated web API:
+1. 创建一次性或限次 Worker 注册凭据；
+2. 创建 Client Token，供 MCP Host、REST Client 或自动化程序使用。
 
-```bash
-curl -X POST http://localhost:9230/v1/worker-registrations \
-  -H "Authorization: Bearer <web-session>" \
-  -H "Content-Type: application/json" \
-  -d '{"label":"workstation","expires_in":86400,"max_uses":1}'
-```
+明文注册链接、注册令牌、邀请码和 Client Token 都只会在创建时完整显示一次。立即安全
+保存，不要提交到仓库或写进日志。
 
-The response contains a plaintext `registration_token` and, when
-`CAPOWN_MASTER_PUBLIC_URL` is configured, a `registration_url`. Treat both as
-secrets. The plaintext token is returned only when the registration token is
-created.
+## 3. 注册并启动 Worker
 
-## 4. Register and start a Worker
-
-On the target machine, build or install the Worker and register it with the
-link from the previous step:
+在需要提供本地工具的机器上安装 Worker：
 
 ```bash
-cd worker
-npm ci
-npm run build
-node dist/src/cli.js register \
-  http://localhost:9230/v1/worker-registrations/<token> \
-  --name build-host
-node dist/src/cli.js start --foreground
-```
-
-After installation, the same commands are available as `capown-worker`:
-
-```bash
+bash scripts/install-worker.sh
 capown-worker register https://master.example.com/v1/worker-registrations/<token>
 capown-worker start
 capown-worker status
-capown-worker logs --no-follow
 ```
 
-The Worker stores its configuration at
-`~/.capown/worker/config.toml` and its Ed25519 identity at
-`~/.capown/worker/identity.toml` by default. Registration saves the Worker ID
-and name; the registration token is not persisted.
+在 Windows PowerShell：
 
-The first Worker startup provisions the local `filesystem` MCP plugin and its
-private `~/.capown/worker/workspace` directory. This plugin is local trusted
-code, not an operating-system sandbox.
-
-## 5. Create a client token
-
-Client tokens are created through the authenticated web token API:
-
-```bash
-curl -X POST http://localhost:9230/v1/tokens \
-  -H "Authorization: Bearer <web-session>" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"client","label":"mcp-host"}'
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-worker.ps1
+& "$HOME\.capown\bin\capown-worker.cmd" register `
+  https://master.example.com/v1/worker-registrations/<token>
+& "$HOME\.capown\bin\capown-worker.cmd" start
+& "$HOME\.capown\bin\capown-worker.cmd" status
 ```
 
-Store the returned plaintext token securely. It is shown only at creation
-time and can later be disabled or revoked through the web token API.
-
-## 6. Connect through MCP
-
-Configure the MCP host to send requests to:
+注册链接格式固定为：
 
 ```text
-http://localhost:9230/mcp
-Authorization: Bearer <client-token>
+<master-origin>/v1/worker-registrations/<cown_register_token>
 ```
 
-The endpoint is stateless. Every request needs the client token and the MCP
-`Accept: application/json, text/event-stream` header. See [MCP](mcp.md) for
-initialization, tools, Origin handling, and examples.
+`register` 会生成或复用本机 Ed25519 身份，写入 Worker ID 和名称；注册令牌不会被
+保存。启动后，Worker 持续发送心跳并通过长轮询领取任务。默认的 `filesystem` 插件
+在第一次启动时被配置到 `~/.capown/worker/workspace`。
 
-## 7. Use the REST client
+> Worker 安装脚本只安装应用和启动器，`capown-worker start` 启动后台进程，但不会创建
+> 系统服务或开机自启。长期运行方式见
+> [生产部署](deployment.md#worker-process-management)。
 
-The repository also includes a small standard-library client. It reads the
-default config at `~/.capown/client/config.toml` (or the path passed with
-`--config`):
+## 4. 确认 Worker 和插件
+
+回到 Dashboard 的“Workers”页面，确认节点在线。打开节点详情可以查看主机信息、心跳、
+已发现插件及其工具；“插件”页面可以跨 Worker 查看运行状态并启用或禁用插件。
+
+命令行也可验证本机 Worker：
+
+```bash
+capown-worker status
+capown-worker logs --no-follow
+capown-worker config show
+```
+
+## 5. 连接 MCP Host
+
+使用 Dashboard 生成的 Client Token：
+
+```text
+POST http://localhost:9230/mcp
+Authorization: Bearer <client-token>
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+完成 `initialize` 后，MCP Host 可通过 `tools/list` 发现 `workers_list`、
+`worker_get`、`plugin_list`、`plugin_call`、`task_get`、`task_wait` 和
+`task_cancel`。详情与示例参见 [MCP 接入](mcp.md)。
+
+## 6. 可选：使用 Python REST Client
+
+创建 `~/.capown/client/config.toml`：
 
 ```toml
 role = "client"
@@ -158,35 +138,25 @@ client_token = "<client-token>"
 soft_timeout = 30
 ```
 
-List Workers from the command line:
+再从仓库根目录调用：
 
 ```bash
 python client/capown_client.py workers-list
+python client/capown_client.py plugin-list <worker-name>
+python client/capown_client.py plugin-call \
+  --worker <worker-name> \
+  --plugin-id filesystem \
+  --tool-name <tool-name> \
+  --arguments '{}'
 ```
 
-The library API remains available for Python callers:
+Python Client 是 `/v1` REST 合约的轻量实现，不是另一套协议。它目前包含 Worker、
+插件和任务查询，以及插件调用；插件安装、卸载和启停应使用 Dashboard 或直接遵照
+OpenAPI 调用。
 
-```python
-from client.capown_client import CapownClient, ClientConfig
+## 下一步
 
-client = CapownClient(ClientConfig(
-    master_url="http://localhost:9230",
-    client_token="<client-token>",
-))
-print(client.workers_list())
-```
-
-Its methods target the same `/v1` contract. It is not a replacement protocol
-and exposes MCP-aligned methods such as `workers_list`, `worker_get`,
-`plugin_list`, `plugin_call`, `task_get`, `task_wait`, and `task_cancel`.
-
-## Troubleshooting
-
-- Master health fails: inspect `docker compose logs -f master` and verify the
-  host port mapping.
-- Worker is offline: run `capown-worker status`, then
-  `capown-worker logs --no-follow`; verify `master_url` and network access.
-- Registration fails: create a fresh registration token and verify that the
-  URL uses `/v1/worker-registrations/<token>`.
-- MCP returns `401`: use a client token, not a web session, admin token,
-  Worker session, or registration token.
+- 配置真实域名、TLS、CORS 和进程托管：[生产部署](deployment.md)
+- 了解 Dashboard 的访问控制和日常管理：[产品使用](product-guide.md)
+- 管理插件和理解信任边界：[插件与插件市场](plugins.md)
+- 查看任务交付、取消和持久化边界：[系统架构](architecture.md)

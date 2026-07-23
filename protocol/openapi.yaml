@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: CapOwn Control Plane API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Language-independent v0.2.0 wire contract for the CapOwn control plane.
+    Language-independent v0.3.0 wire contract for the CapOwn control plane.
 
     Covers the connectivity milestone, plugin discovery, task dispatch,
     claim-based job delivery, results, cancellation, and plugin invocation
@@ -13,7 +13,7 @@ info:
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
-  x-capown-protocol-version: "0.2.0"
+  x-capown-protocol-version: "0.3.0"
   x-capown-plugin-error-codes:
     - plugin_not_found
     - plugin_disabled
@@ -1079,6 +1079,30 @@ paths:
         "404":
           $ref: '#/components/responses/NotFound'
 
+  /v1/admin/workers:
+    get:
+      tags: [admin, workers]
+      summary: List all active Workers
+      description: |
+        Returns all non-revoked Workers across every owner. This administrative
+        view is separate from `GET /v1/workers`, which remains scoped to the
+        authenticated caller's owner identity.
+      operationId: adminListWorkers
+      security:
+        - bearerAuth: []
+      x-capown-auth-token-types: [web, admin]
+      responses:
+        "200":
+          description: Cross-owner Worker list ordered by registration time.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerListResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
   /v1/admin/users:
     get:
       tags: [admin]
@@ -1588,7 +1612,7 @@ components:
           type: string
         protocol_version:
           type: string
-          const: "0.2.0"
+          const: "0.3.0"
         initialized:
           type: boolean
         capabilities:
